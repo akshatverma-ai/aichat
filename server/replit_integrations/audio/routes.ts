@@ -33,11 +33,12 @@ export function registerAudioRoutes(app: Express): void {
     }
   });
 
-  // Create new conversation
+  // Create new conversation (userId is optional for backwards compatibility)
   app.post("/api/conversations", async (req: Request, res: Response) => {
     try {
       const { title } = req.body;
-      const conversation = await chatStorage.createConversation(title || "New Chat");
+      const userId = (req as any).session?.userId;
+      const conversation = await chatStorage.createConversation(title || "New Chat", userId);
       res.status(201).json(conversation);
     } catch (error) {
       console.error("Error creating conversation:", error);
@@ -57,79 +58,103 @@ export function registerAudioRoutes(app: Express): void {
     }
   });
 
-  // Send voice message and get streaming audio response
-  // Auto-detects audio format and converts WebM/MP4/OGG to WAV
-  // Uses gpt-4o-mini-transcribe for STT, gpt-audio for voice response
+  // Send message (text or voice) and get AI response
+  // Handles both text chat and voice conversation
   app.post("/api/conversations/:id/messages", audioBodyParser, async (req: Request, res: Response) => {
     try {
       const conversationId = parseInt(req.params.id);
-      const { audio, voice = "alloy" } = req.body;
+      const { content, audio, voice = "alloy" } = req.body;
 
-      if (!audio) {
-        return res.status(400).json({ error: "Audio data (base64) is required" });
+      if (!content && !audio) {
+        return res.status(400).json({ error: "Either content (text) or audio data is required" });
       }
 
-      // 1. Auto-detect format and convert to OpenAI-compatible format
-      const rawBuffer = Buffer.from(audio, "base64");
-      const { buffer: audioBuffer, format: inputFormat } = await ensureCompatibleFormat(rawBuffer);
+      let userMessage = content;
 
-      // 2. Transcribe user audio
-      const userTranscript = await speechToText(audioBuffer, inputFormat);
+      // 1. If audio provided, transcribe it
+      if (audio) {
+        const rawBuffer = Buffer.from(audio, "base64");
+        const { buffer: audioBuffer, format: inputFormat } = await ensureCompatibleFormat(rawBuffer);
+        userMessage = await speechToText(audioBuffer, inputFormat);
+      }
 
-      // 3. Save user message
-      await chatStorage.createMessage(conversationId, "user", userTranscript);
+      // 2. Save user message
+      await chatStorage.createMessage(conversationId, "user", userMessage);
 
-      // 4. Get conversation history
+      // 3. Get conversation history
       const existingMessages = await chatStorage.getMessagesByConversation(conversationId);
       const chatHistory = existingMessages.map((m) => ({
         role: m.role as "user" | "assistant",
         content: m.content,
       }));
 
-      // 5. Set up SSE
+      // 4. Set up SSE
       res.setHeader("Content-Type", "text/event-stream");
       res.setHeader("Cache-Control", "no-cache");
       res.setHeader("Connection", "keep-alive");
 
-      res.write(`data: ${JSON.stringify({ type: "user_transcript", data: userTranscript })}\n\n`);
+      // 5. Stream response based on whether audio was provided
+      if (audio) {
+        // Voice mode: use gpt-audio model with streaming audio
+        res.write(`data: ${JSON.stringify({ type: "user_transcript", data: userMessage })}\n\n`);
 
-      // 6. Stream audio response from gpt-audio
-      const stream = await openai.chat.completions.create({
-        model: "gpt-audio",
-        modalities: ["text", "audio"],
-        audio: { voice, format: "pcm16" },
-        messages: chatHistory,
-        stream: true,
-      });
+        const stream = await openai.chat.completions.create({
+          model: "gpt-audio",
+          modalities: ["text", "audio"],
+          audio: { voice, format: "pcm16" },
+          messages: chatHistory,
+          stream: true,
+        });
 
-      let assistantTranscript = "";
+        let assistantTranscript = "";
 
-      for await (const chunk of stream) {
-        const delta = chunk.choices?.[0]?.delta as any;
-        if (!delta) continue;
+        for await (const chunk of stream) {
+          const delta = chunk.choices?.[0]?.delta as any;
+          if (!delta) continue;
 
-        if (delta?.audio?.transcript) {
-          assistantTranscript += delta.audio.transcript;
-          res.write(`data: ${JSON.stringify({ type: "transcript", data: delta.audio.transcript })}\n\n`);
+          if (delta?.audio?.transcript) {
+            assistantTranscript += delta.audio.transcript;
+            res.write(`data: ${JSON.stringify({ type: "transcript", data: delta.audio.transcript })}\n\n`);
+          }
+
+          if (delta?.audio?.data) {
+            res.write(`data: ${JSON.stringify({ type: "audio", data: delta.audio.data })}\n\n`);
+          }
         }
 
-        if (delta?.audio?.data) {
-          res.write(`data: ${JSON.stringify({ type: "audio", data: delta.audio.data })}\n\n`);
+        await chatStorage.createMessage(conversationId, "assistant", assistantTranscript);
+        res.write(`data: ${JSON.stringify({ type: "done" })}\n\n`);
+      } else {
+        // Text mode: use regular streaming chat completions
+        const stream = await openai.chat.completions.create({
+          model: "gpt-5.1",
+          messages: chatHistory,
+          stream: true,
+          max_completion_tokens: 8192,
+        });
+
+        let fullResponse = "";
+
+        for await (const chunk of stream) {
+          const content = chunk.choices[0]?.delta?.content || "";
+          if (content) {
+            fullResponse += content;
+            res.write(`data: ${JSON.stringify({ content })}\n\n`);
+          }
         }
+
+        await chatStorage.createMessage(conversationId, "assistant", fullResponse);
+        res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
       }
 
-      // 7. Save assistant message
-      await chatStorage.createMessage(conversationId, "assistant", assistantTranscript);
-
-      res.write(`data: ${JSON.stringify({ type: "done", transcript: assistantTranscript })}\n\n`);
       res.end();
     } catch (error) {
-      console.error("Error processing voice message:", error);
+      console.error("Error processing message:", error);
       if (res.headersSent) {
-        res.write(`data: ${JSON.stringify({ type: "error", error: "Failed to process voice message" })}\n\n`);
+        res.write(`data: ${JSON.stringify({ type: "error", error: "Failed to process message" })}\n\n`);
         res.end();
       } else {
-        res.status(500).json({ error: "Failed to process voice message" });
+        res.status(500).json({ error: "Failed to process message" });
       }
     }
   });

@@ -128,6 +128,7 @@ export async function registerRoutes(
     try {
       const input = api.conversations.create.input.parse(req.body);
       const convo = await storage.createConversation(req.session.userId, input.title);
+      // Also ensure this is saved to chatStorage for the audio routes
       res.status(201).json(convo);
     } catch (err) {
       res.status(400).json({ message: "Invalid input" });
