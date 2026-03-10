@@ -1,0 +1,187 @@
+You are an expert full-stack developer. Build a COMPLETE production-ready web app called **AIVA – AI Companion**.
+
+GOAL:
+Create a futuristic AI companion app where users can talk with an AI female assistant using voice or text. The AI can also help using the device camera and store conversation history.
+
+TECH STACK:
+
+Frontend
+React + Vite
+TailwindCSS
+Framer Motion animations
+
+Backend
+Node.js + Express
+
+Database
+Firebase Firestore
+
+Authentication
+Firebase Auth
+
+* Email login
+* Google login
+
+AI
+OpenAI API for conversations
+
+Voice
+Web Speech API
+
+* Speech to text
+* Text to speech
+
+Camera
+MediaDevices API
+Basic emotion detection using TensorFlow.js or MediaPipe
+
+DESIGN STYLE
+
+Dark futuristic UI
+
+Colors
+Background: #0B0F1A
+Primary neon: #00E5FF
+Accent: #8A7CFF
+
+Elements
+
+* glowing buttons
+* rounded cards
+* glassmorphism panels
+* centered AI female avatar
+
+APP SCREENS
+
+1 Splash Screen
+Logo: AIVA
+Subtitle: Your AI Companion
+Animated glow logo
+Auto redirect after 2 seconds
+
+2 Login / Signup
+Fields:
+Name
+Email
+Password
+
+Buttons:
+Login
+Create Account
+Continue with Google
+
+Store user in Firebase.
+
+3 AI Setup
+Select female AI avatar
+Select personality:
+Friendly
+Funny
+Smart Helper
+
+Save preferences in Firestore.
+
+4 Main AI Home Screen
+
+Center:
+3D AI female avatar
+
+Buttons:
+Voice
+Chat
+Camera Assist
+
+Greeting message:
+"Hi, how are you today?"
+
+5 Chat Screen
+
+Chat layout
+User messages right
+AI messages left
+
+Use OpenAI API to generate responses.
+
+Store chat history in Firestore.
+
+6 Voice Conversation
+
+Microphone button
+Convert speech to text
+Send to AI
+AI response spoken using text-to-speech.
+
+7 Camera Assist Screen
+
+Open device camera.
+
+Overlay instruction panel.
+
+Example response:
+"Looks good. Now add the spices."
+
+Allow AI help for cooking, study, repair.
+
+8 Emotion Detection
+
+Use camera + TensorFlow.js
+
+Detect moods:
+happy
+sad
+neutral
+
+If sad detected show:
+"You look a bit sad. Want to talk?"
+
+9 Profile Screen
+
+User information
+AI personality settings
+Voice toggle
+Logout
+
+DATABASE STRUCTURE
+
+Users collection
+id
+name
+email
+avatar
+personality
+
+Chats collection
+userId
+messages
+timestamp
+
+FEATURES
+
+Persistent chat memory
+Friendly natural conversation
+Voice interaction
+Camera assist
+Emotion detection
+
+PROJECT STRUCTURE
+
+frontend
+React Vite project
+
+backend
+Express API server
+
+firebase config
+auth + firestore
+
+deployment ready
+
+DEPLOYMENT
+
+Make the project ready to run on Replit.
+
+Add a Run button that starts backend and frontend together.
+
+Add instructions to deploy publicly from Replit.
+
+Ensure the app runs fully after installation without additional coding.
