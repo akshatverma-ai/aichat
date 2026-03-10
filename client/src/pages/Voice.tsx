@@ -48,16 +48,16 @@ export default function Voice() {
   const avatarUrl = user ? AVATARS[user.avatar as keyof typeof AVATARS] : AVATARS.avatar1;
 
   return (
-    <Layout title="AUDIO LINK" showBack>
+    <Layout title="Aichat - Voice Chat" showBack>
       <div className="flex-1 flex flex-col items-center justify-between py-10 relative">
         
         <div className="text-center w-full px-6">
           <motion.div 
             animate={{ opacity: [0.5, 1, 0.5] }}
-            transition={{ duration: 2, repeat: Infinity }}
+            transition={{ duration: 1.5, repeat: Infinity }}
             className="text-xs font-heading font-bold text-primary tracking-[0.3em] mb-8"
           >
-            {isRecording ? "RECORDING ACTIVE" : isPlaying ? "AIVA IS SPEAKING" : isProcessing ? "PROCESSING" : "STANDBY"}
+            {isRecording ? "RECORDING ACTIVE" : isPlaying ? "AICHAT IS SPEAKING" : isProcessing ? "PROCESSING" : "STANDBY"}
           </motion.div>
           
           {/* Audio Visualizer Mock */}

@@ -45,25 +45,25 @@ export default function Splash() {
       <motion.div
         initial={{ scale: 0.8, opacity: 0 }}
         animate={{ scale: 1, opacity: 1 }}
-        transition={{ duration: 1.5, ease: "easeOut" }}
+        transition={{ duration: 1, ease: "easeOut" }}
         className="relative z-10 flex flex-col items-center"
       >
         <motion.div
           animate={{ 
             boxShadow: ["0 0 20px rgba(0,229,255,0.2)", "0 0 60px rgba(0,229,255,0.6)", "0 0 20px rgba(0,229,255,0.2)"] 
           }}
-          transition={{ duration: 2, repeat: Infinity }}
+          transition={{ duration: 2.5, repeat: Infinity }}
           className="w-32 h-32 rounded-full border-2 border-primary/50 flex items-center justify-center mb-8 glass-panel"
         >
           <div className="w-24 h-24 rounded-full border border-accent/50 flex items-center justify-center bg-black/50">
-            <span className="font-display font-bold text-4xl text-primary neon-text-primary tracking-tighter">AIVA</span>
+            <span className="font-display font-bold text-4xl text-primary neon-text-primary tracking-tighter">Aichat</span>
           </div>
         </motion.div>
 
         <motion.h1 
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.5, duration: 1 }}
+          transition={{ delay: 0.3, duration: 0.7 }}
           className="font-display text-2xl font-bold tracking-[0.2em] text-white"
         >
           AI COMPANION
@@ -72,14 +72,14 @@ export default function Splash() {
         <motion.div 
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
-          transition={{ delay: 1, duration: 1 }}
+          transition={{ delay: 0.6, duration: 0.7 }}
           className="mt-12 flex gap-2"
         >
           {[0, 1, 2].map((i) => (
             <motion.div
               key={i}
               animate={{ opacity: [0.3, 1, 0.3] }}
-              transition={{ duration: 1.5, repeat: Infinity, delay: i * 0.2 }}
+              transition={{ duration: 1.2, repeat: Infinity, delay: i * 0.15 }}
               className="w-2 h-2 rounded-full bg-primary"
             />
           ))}

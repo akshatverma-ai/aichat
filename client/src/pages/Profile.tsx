@@ -46,7 +46,7 @@ export default function Profile() {
 
           <div className="glass-panel p-4 rounded-2xl flex justify-between items-center">
             <div>
-              <p className="text-xs text-muted-foreground font-heading tracking-widest uppercase">AIVA Personality Matrix</p>
+              <p className="text-xs text-muted-foreground font-heading tracking-widest uppercase">Aichat Personality Matrix</p>
               <p className="text-lg font-bold text-accent">{user?.personality}</p>
             </div>
           </div>
@@ -55,7 +55,7 @@ export default function Profile() {
         <div className="w-full mt-auto space-y-3 pt-8">
           <Link href="/setup">
             <GlowingButton variant="outline" className="w-full mb-3">
-              <Settings2 className="w-4 h-4" /> RECONFIGURE AIVA
+              <Settings2 className="w-4 h-4" /> RECONFIGURE AICHAT
             </GlowingButton>
           </Link>
           <GlowingButton 

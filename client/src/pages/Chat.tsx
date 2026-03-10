@@ -96,7 +96,7 @@ export default function Chat() {
   };
 
   return (
-    <Layout title="NEURAL CHAT" showBack noPadding>
+    <Layout title="Aichat - Text Chat" showBack noPadding>
       <div className="flex-1 flex flex-col h-full pt-20 pb-4 px-4 relative">
         <div className="flex-1 overflow-y-auto hide-scrollbar space-y-6 pb-20">
           {isLoading && (
@@ -111,6 +111,7 @@ export default function Chat() {
                 key={msg.id}
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.3 }}
                 className={cn(
                   "flex w-full",
                   msg.role === "user" ? "justify-end" : "justify-start"

@@ -28,7 +28,7 @@ export default function Home() {
   };
 
   return (
-    <Layout title="AIVA CORE" noPadding>
+    <Layout title="Aichat - Main Console" noPadding>
       <div className="flex-1 flex flex-col items-center justify-center relative p-6 mt-16">
         
         {/* Holographic Avatar Display */}
@@ -36,25 +36,25 @@ export default function Home() {
           {/* Outer glowing rings */}
           <motion.div 
             animate={{ rotate: 360 }} 
-            transition={{ duration: 20, repeat: Infinity, ease: "linear" }}
+            transition={{ duration: 30, repeat: Infinity, ease: "linear" }}
             className="absolute inset-[-20%] rounded-full border border-primary/20 border-dashed"
           />
           <motion.div 
             animate={{ rotate: -360 }} 
-            transition={{ duration: 15, repeat: Infinity, ease: "linear" }}
+            transition={{ duration: 25, repeat: Infinity, ease: "linear" }}
             className="absolute inset-[-10%] rounded-full border border-accent/30 border-dotted"
           />
           
           <motion.div
             initial={{ scale: 0.9, opacity: 0 }}
             animate={{ scale: 1, opacity: 1 }}
-            transition={{ duration: 1 }}
+            transition={{ duration: 0.6 }}
             className="w-full h-full rounded-full overflow-hidden relative shadow-[0_0_50px_rgba(0,229,255,0.3)] z-10 border-2 border-primary/50"
           >
             {/* futuristic portrait of a woman neon lighting cyberpunk */}
             <img 
               src={avatarUrl} 
-              alt="AIVA" 
+              alt="Aichat" 
               className="w-full h-full object-cover"
             />
             <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent mix-blend-overlay" />
@@ -70,7 +70,7 @@ export default function Home() {
         <div className="text-center mb-12">
           <h2 className="text-3xl font-display font-bold text-white mb-2">{user?.name ? `Hello, ${user.name}` : "SYSTEM READY"}</h2>
           <p className="text-primary/80 font-heading tracking-widest text-sm uppercase">
-            AIVA // {user?.personality || "Standard"} Protocol
+            Aichat // {user?.personality || "Standard"} Protocol
           </p>
         </div>
 

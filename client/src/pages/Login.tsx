@@ -42,7 +42,7 @@ export default function Login() {
         className="w-full max-w-md glass-panel-heavy rounded-3xl p-8 z-10"
       >
         <div className="text-center mb-10">
-          <h1 className="font-display text-4xl font-bold text-white neon-text-primary mb-2">AIVA</h1>
+          <h1 className="font-display text-4xl font-bold text-white neon-text-primary mb-2">Aichat</h1>
           <p className="text-muted-foreground font-heading tracking-widest text-sm uppercase">
             {isLogin ? "Neural Link Establishment" : "Initialize New Neural Pathway"}
           </p>
