@@ -7,12 +7,29 @@ export function useAuth() {
   const { data: user, isLoading } = useQuery<User | null>({
     queryKey: ["/api/me"],
     queryFn: async () => {
-      const res = await fetch("/api/me");
-      if (res.status === 401) return null;
-      if (!res.ok) throw new Error("Failed to fetch user");
-      return res.json();
+      try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 second timeout
+        
+        const res = await fetch("/api/me", { 
+          signal: controller.signal,
+          credentials: "include"
+        });
+        clearTimeout(timeoutId);
+        
+        if (res.status === 401) return null;
+        if (!res.ok) throw new Error("Failed to fetch user");
+        return res.json();
+      } catch (err: any) {
+        if (err.name === "AbortError") {
+          console.warn("Auth check timeout");
+          return null;
+        }
+        throw err;
+      }
     },
-    retry: false,
+    retry: 1,
+    staleTime: 1000 * 60 * 5, // 5 minutes
   });
 
   const login = useMutation({
