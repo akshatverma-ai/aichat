@@ -35,7 +35,10 @@ export default function Chat() {
 
   const handleSend = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!input.trim() || isSending || !convId) return;
+    if (!input.trim() || isSending || !convId) {
+      console.warn("Send blocked:", { input: !!input.trim(), sending: isSending, convId });
+      return;
+    }
 
     const userMsg: LocalMessage = { id: Date.now(), role: "user", content: input };
     setMessages(prev => [...prev, userMsg]);

@@ -92,8 +92,14 @@ export default function CameraView() {
 
   // Start real-time analysis loop
   useEffect(() => {
+    if (!webcamRef.current) return;
+    
     captureIntervalRef.current = setInterval(() => {
-      captureAndAnalyze();
+      try {
+        captureAndAnalyze();
+      } catch (error) {
+        console.error("Capture interval error:", error);
+      }
     }, 4000);
 
     return () => {

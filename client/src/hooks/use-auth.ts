@@ -95,19 +95,28 @@ export function useAuth() {
 
   const updateProfile = useMutation({
     mutationFn: async (updates: Partial<User>) => {
-      const res = await fetch("/api/users/me", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(updates),
-        credentials: "include",
-      });
-      if (!res.ok) throw new Error("Failed to update profile");
-      return res.json();
+      try {
+        const res = await fetch("/api/users/me", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(updates),
+          credentials: "include",
+        });
+        
+        if (!res.ok) {
+          const errorData = await res.json().catch(() => ({}));
+          throw new Error(errorData.message || `Failed: ${res.status}`);
+        }
+        
+        return res.json();
+      } catch (error) {
+        console.error("Profile update error:", error);
+        throw error;
+      }
     },
     onSuccess: (updatedUser) => {
-      // Update cache immediately with fresh data - don't refetch
+      // Update cache immediately with fresh data
       queryClient.setQueryData(["/api/me"], updatedUser);
-      queryClient.removeQueries({ queryKey: ["/api/me"], type: "inactive" });
     },
   });
 
