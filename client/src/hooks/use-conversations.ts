@@ -21,11 +21,17 @@ export function useActiveConversation() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ title }),
+        credentials: "include",
       });
       if (!res.ok) throw new Error("Failed to create conversation");
       return res.json();
     },
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["/api/conversations"] }),
+    onSuccess: (newConversation) => {
+      // Update cache immediately with fresh data
+      const existing = queryClient.getQueryData<Conversation[]>(["/api/conversations"]) || [];
+      queryClient.setQueryData(["/api/conversations"], [newConversation, ...existing]);
+      // Don't refetch - data is fresh
+    },
   });
 
   const activeConversation = conversations?.[0];
