@@ -6,13 +6,11 @@ import { Mic, MessageSquare, Camera } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
 import { useActiveConversation } from "@/hooks/use-conversations";
 import { AVATARS } from "@/lib/utils";
-import { useToast } from "@/hooks/use-toast";
 
 export default function Home() {
   const { user } = useAuth();
   const [, setLocation] = useLocation();
   const { conversations, activeConversation, createConversation, isLoadingList } = useActiveConversation();
-  const { toast } = useToast();
   const [navigatingTo, setNavigatingTo] = useState<string | null>(null);
   
   const currentConvId = activeConversation?.id;
@@ -26,29 +24,21 @@ export default function Home() {
   }, [isLoadingList, conversations, createConversation]);
 
   // Navigate to a feature with a conversation ID
-  const navigateTo = async (path: string) => {
-    try {
-      setNavigatingTo(path);
-      
-      // If no conversation exists yet, create one
-      if (!currentConvId) {
-        // Wait for conversation to be created
-        const result = await createConversation.mutateAsync("Main Session");
-        const convId = result.id;
-        setLocation(`${path}/${convId}`);
-      } else {
-        // Navigate immediately with existing conversation
-        setLocation(`${path}/${currentConvId}`);
-      }
-    } catch (error) {
-      console.error("Navigation error:", error);
-      toast({
-        title: "Navigation Error",
-        description: "Could not open feature. Please try again.",
-        variant: "destructive",
+  const navigateTo = (path: string) => {
+    setNavigatingTo(path);
+    if (currentConvId) {
+      setLocation(`${path}/${currentConvId}`);
+    } else {
+      // Conversation should exist by now, but if not, try to create one
+      createConversation.mutate("Main Session", {
+        onSuccess: (newConv) => {
+          setLocation(`${path}/${newConv.id}`);
+          setNavigatingTo(null);
+        },
+        onError: () => {
+          setNavigatingTo(null);
+        },
       });
-    } finally {
-      setNavigatingTo(null);
     }
   };
 
@@ -103,7 +93,7 @@ export default function Home() {
         <div className="w-full grid grid-cols-3 gap-4 px-2">
           <button
             onClick={() => navigateTo('/chat')}
-            disabled={navigatingTo !== null || isLoadingList}
+            disabled={isLoadingList}
             className="flex flex-col items-center justify-center gap-3 p-4 rounded-2xl glass-panel hover:bg-primary/10 transition-all group disabled:opacity-50 disabled:cursor-not-allowed"
             data-testid="button-text-chat"
           >
@@ -119,7 +109,7 @@ export default function Home() {
 
           <button
             onClick={() => navigateTo('/voice')}
-            disabled={navigatingTo !== null || isLoadingList}
+            disabled={isLoadingList}
             className="flex flex-col items-center justify-center gap-3 p-4 rounded-2xl glass-panel border-primary/50 hover:bg-primary/20 shadow-[0_0_20px_rgba(0,229,255,0.1)] transition-all group translate-y-[-10px] disabled:opacity-50 disabled:cursor-not-allowed"
             data-testid="button-voice-chat"
           >
@@ -135,7 +125,7 @@ export default function Home() {
 
           <button
             onClick={() => setLocation('/camera')}
-            disabled={navigatingTo !== null}
+            disabled={isLoadingList}
             className="flex flex-col items-center justify-center gap-3 p-4 rounded-2xl glass-panel hover:bg-accent/10 transition-all group disabled:opacity-50 disabled:cursor-not-allowed"
             data-testid="button-visual-assist"
           >
