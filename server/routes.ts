@@ -8,6 +8,7 @@ import { pool } from "./db";
 import connectPg from "connect-pg-simple";
 import { registerAudioRoutes } from "./replit_integrations/audio";
 import { registerImageRoutes } from "./replit_integrations/image";
+import { registerVisionRoutes } from "./replit_integrations/vision";
 
 const PostgresStore = connectPg(session);
 
@@ -148,6 +149,7 @@ export async function registerRoutes(
   // AI audio integration routes for /api/conversations/:id/messages
   registerAudioRoutes(app);
   registerImageRoutes(app);
+  registerVisionRoutes(app);
 
   return httpServer;
 }
