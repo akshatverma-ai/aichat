@@ -11,8 +11,25 @@ export default function CameraView() {
   const [audioUrl, setAudioUrl] = useState<string>("");
   const [isPlaying, setIsPlaying] = useState(false);
   const webcamRef = useRef<Webcam>(null);
-  const audioRef = useRef<HTMLAudioElement>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
   const captureIntervalRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Initialize audio element on mount
+  useEffect(() => {
+    if (!audioRef.current) {
+      const audioElement = new Audio();
+      audioElement.crossOrigin = "anonymous";
+      audioElement.onended = () => setIsPlaying(false);
+      audioRef.current = audioElement;
+    }
+
+    return () => {
+      if (audioRef.current) {
+        audioRef.current.pause();
+        audioRef.current.src = "";
+      }
+    };
+  }, []);
 
   // Capture and analyze frames in real-time
   const captureAndAnalyze = useCallback(async () => {
@@ -84,18 +101,34 @@ export default function CameraView() {
     };
   }, [captureAndAnalyze]);
 
-  const playAudio = () => {
-    if (audioUrl && audioRef.current) {
-      audioRef.current.play();
+  const playAudio = async () => {
+    if (!audioRef.current || !audioUrl) {
+      console.warn("Audio element or URL not available");
+      return;
+    }
+
+    try {
+      audioRef.current.src = audioUrl;
+      audioRef.current.load();
+      
       setIsPlaying(true);
+      const playPromise = audioRef.current.play();
+
+      if (playPromise !== undefined) {
+        await playPromise.catch((err) => {
+          console.error("Playback failed:", err);
+          setIsPlaying(false);
+        });
+      }
+    } catch (error) {
+      console.error("Audio setup error:", error);
+      setIsPlaying(false);
     }
   };
 
   return (
     <Layout title="Aichat - Visual Assist" showBack noPadding>
       <div className="flex-1 flex flex-col relative bg-black">
-        
-        <audio ref={audioRef} onEnded={() => setIsPlaying(false)} style={{ display: "none" }} />
 
         <div className="absolute inset-0 overflow-hidden">
           <Webcam
