@@ -23,16 +23,14 @@ export default function Login() {
       if (isLogin) {
         const user = await login.mutateAsync({ email, password });
         if (user?.id) {
-          localStorage.setItem("userLoggedIn", "true");
-          localStorage.setItem("userId", String(user.id));
-          setTimeout(() => setLocation("/home"), 50);
+          // Redirect immediately - data is already set in cache
+          setLocation("/home");
         }
       } else {
         const user = await register.mutateAsync({ email, password, name });
         if (user?.id) {
-          localStorage.setItem("userLoggedIn", "true");
-          localStorage.setItem("userId", String(user.id));
-          setTimeout(() => setLocation("/setup"), 50);
+          // Redirect immediately - data is already set in cache
+          setLocation("/setup");
         }
       }
     } catch (err: any) {

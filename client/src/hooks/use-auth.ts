@@ -9,7 +9,7 @@ export function useAuth() {
     queryFn: async () => {
       try {
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 second timeout
+        const timeoutId = setTimeout(() => controller.abort(), 5000);
         
         const res = await fetch("/api/me", { 
           signal: controller.signal,
@@ -29,7 +29,8 @@ export function useAuth() {
       }
     },
     retry: 1,
-    staleTime: 1000 * 60 * 5, // 5 minutes
+    staleTime: 1000 * 60 * 5,
+    gcTime: 1000 * 60 * 5, // Keep cached data for 5 minutes
   });
 
   const login = useMutation({
@@ -49,8 +50,10 @@ export function useAuth() {
     onSuccess: (data) => {
       localStorage.setItem("userLoggedIn", "true");
       localStorage.setItem("userId", String(data.id || ""));
+      // Set data FIRST so it's immediately available
       queryClient.setQueryData(["/api/me"], data);
-      queryClient.invalidateQueries({ queryKey: ["/api/me"] });
+      // Don't refetch since we just got fresh data from login
+      queryClient.removeQueries({ queryKey: ["/api/me"], type: "inactive" });
     },
   });
 
@@ -71,8 +74,10 @@ export function useAuth() {
     onSuccess: (data) => {
       localStorage.setItem("userLoggedIn", "true");
       localStorage.setItem("userId", String(data.id || ""));
+      // Set data FIRST so it's immediately available
       queryClient.setQueryData(["/api/me"], data);
-      queryClient.invalidateQueries({ queryKey: ["/api/me"] });
+      // Don't refetch since we just got fresh data from registration
+      queryClient.removeQueries({ queryKey: ["/api/me"], type: "inactive" });
     },
   });
 
