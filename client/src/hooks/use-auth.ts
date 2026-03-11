@@ -38,6 +38,7 @@ export function useAuth() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(credentials),
+        credentials: "include",
       });
       if (!res.ok) {
         const error = await res.json();
@@ -45,7 +46,12 @@ export function useAuth() {
       }
       return res.json();
     },
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["/api/me"] }),
+    onSuccess: (data) => {
+      localStorage.setItem("userLoggedIn", "true");
+      localStorage.setItem("userId", String(data.id || ""));
+      queryClient.setQueryData(["/api/me"], data);
+      queryClient.invalidateQueries({ queryKey: ["/api/me"] });
+    },
   });
 
   const register = useMutation({
@@ -54,6 +60,7 @@ export function useAuth() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(userData),
+        credentials: "include",
       });
       if (!res.ok) {
         const error = await res.json();
@@ -61,14 +68,21 @@ export function useAuth() {
       }
       return res.json();
     },
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["/api/me"] }),
+    onSuccess: (data) => {
+      localStorage.setItem("userLoggedIn", "true");
+      localStorage.setItem("userId", String(data.id || ""));
+      queryClient.setQueryData(["/api/me"], data);
+      queryClient.invalidateQueries({ queryKey: ["/api/me"] });
+    },
   });
 
   const logout = useMutation({
     mutationFn: async () => {
-      await fetch("/api/logout", { method: "POST" });
+      await fetch("/api/logout", { method: "POST", credentials: "include" });
     },
     onSuccess: () => {
+      localStorage.removeItem("userLoggedIn");
+      localStorage.removeItem("userId");
       queryClient.setQueryData(["/api/me"], null);
       queryClient.clear();
     },

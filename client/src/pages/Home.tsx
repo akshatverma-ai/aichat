@@ -11,6 +11,8 @@ export default function Home() {
   const { user } = useAuth();
   const [, setLocation] = useLocation();
   const { conversations, activeConversation, createConversation, isLoadingList } = useActiveConversation();
+  const currentConvId = activeConversation?.id;
+  const avatarUrl = user ? AVATARS[user.avatar as keyof typeof AVATARS] : AVATARS.avatar1;
 
   useEffect(() => {
     if (!isLoadingList && (!conversations || conversations.length === 0)) {
@@ -18,8 +20,14 @@ export default function Home() {
     }
   }, [conversations, isLoadingList, createConversation]);
 
-  const avatarUrl = user ? AVATARS[user.avatar as keyof typeof AVATARS] : AVATARS.avatar1;
-  const currentConvId = activeConversation?.id;
+  useEffect(() => {
+    if (activeConversation?.id && currentConvId) {
+      const timer = setTimeout(() => {
+        setLocation("/chat/" + activeConversation.id);
+      }, 100);
+      return () => clearTimeout(timer);
+    }
+  }, [activeConversation?.id, currentConvId, setLocation]);
 
   const navigateTo = (path: string) => {
     if (currentConvId) {

@@ -21,11 +21,19 @@ export default function Login() {
     
     try {
       if (isLogin) {
-        await login.mutateAsync({ email, password });
-        setLocation("/home");
+        const user = await login.mutateAsync({ email, password });
+        if (user?.id) {
+          localStorage.setItem("userLoggedIn", "true");
+          localStorage.setItem("userId", String(user.id));
+          setTimeout(() => setLocation("/home"), 50);
+        }
       } else {
-        await register.mutateAsync({ email, password, name });
-        setLocation("/setup");
+        const user = await register.mutateAsync({ email, password, name });
+        if (user?.id) {
+          localStorage.setItem("userLoggedIn", "true");
+          localStorage.setItem("userId", String(user.id));
+          setTimeout(() => setLocation("/setup"), 50);
+        }
       }
     } catch (err: any) {
       setError(err.message);

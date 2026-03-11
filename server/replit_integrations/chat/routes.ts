@@ -85,7 +85,7 @@ export function registerChatRoutes(app: Express): void {
         model: "gpt-4o-mini",
         messages: chatMessages,
         stream: true,
-        max_completion_tokens: 8192,
+        max_completion_tokens: 2048,
       });
 
       let fullResponse = "";
