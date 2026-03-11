@@ -12,7 +12,14 @@ export function useVoiceRecorder() {
   const chunksRef = useRef<Blob[]>([]);
 
   const startRecording = useCallback(async (): Promise<void> => {
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    const stream = await navigator.mediaDevices.getUserMedia({
+      audio: {
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true,
+        sampleRate: 16000,
+      },
+    });
     const recorder = new MediaRecorder(stream, {
       mimeType: "audio/webm;codecs=opus",
     });
@@ -24,7 +31,7 @@ export function useVoiceRecorder() {
       if (e.data.size > 0) chunksRef.current.push(e.data);
     };
 
-    recorder.start(100); // Collect chunks every 100ms
+    recorder.start(50);
     setState("recording");
   }, []);
 

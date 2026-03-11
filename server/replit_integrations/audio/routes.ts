@@ -127,10 +127,14 @@ export function registerAudioRoutes(app: Express): void {
       } else {
         // Text mode: use regular streaming chat completions
         const stream = await openai.chat.completions.create({
-          model: "gpt-5.1",
-          messages: chatHistory,
+          model: "gpt-4o-mini",
+          messages: [
+            { role: "system", content: "You are Aichat, a helpful AI assistant. Be concise and conversational. Respond in 2-3 sentences when possible." },
+            ...chatHistory,
+          ],
           stream: true,
-          max_completion_tokens: 8192,
+          max_completion_tokens: 1024,
+          temperature: 0.7,
         });
 
         let fullResponse = "";

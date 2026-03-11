@@ -12,17 +12,29 @@ export default function Voice() {
   const convId = parseInt(id || "0");
   const { user } = useAuth();
   
-  const [transcript, setTranscript] = useState("Awaiting voice input...");
+  const [transcript, setTranscript] = useState("Listening for your voice...");
   const [isProcessing, setIsProcessing] = useState(false);
+  const [isThinking, setIsThinking] = useState(false);
+  const [autoListen, setAutoListen] = useState(true);
 
   const recorder = useVoiceRecorder();
   const stream = useVoiceStream({
     onUserTranscript: (text) => setTranscript(`You: "${text}"`),
-    onTranscript: (_, full) => setTranscript(full),
-    onComplete: () => setIsProcessing(false),
-    onError: (err) => {
-      setTranscript("Error connecting to neural audio interface.");
+    onTranscript: (_, full) => {
+      setIsThinking(true);
+      setTranscript(`AI: ${full}`);
+    },
+    onComplete: () => {
       setIsProcessing(false);
+      setIsThinking(false);
+      if (autoListen) {
+        setTimeout(() => handleMicClick(), 800);
+      }
+    },
+    onError: (err) => {
+      setTranscript("Connection interrupted. Tap to retry.");
+      setIsProcessing(false);
+      setIsThinking(false);
     }
   });
 
@@ -30,15 +42,18 @@ export default function Voice() {
     if (recorder.state === "recording") {
       const blob = await recorder.stopRecording();
       setIsProcessing(true);
-      setTranscript("Processing audio data...");
+      setIsThinking(true);
+      setTranscript("AI is thinking...");
       try {
         await stream.streamVoiceResponse(`/api/conversations/${convId}/messages`, blob);
       } catch (err) {
-        setTranscript("Audio transmission failed.");
+        setTranscript("Connection failed. Tap to retry.");
         setIsProcessing(false);
+        setIsThinking(false);
       }
     } else {
       setTranscript("Listening...");
+      setIsThinking(false);
       await recorder.startRecording();
     }
   };
@@ -54,10 +69,11 @@ export default function Voice() {
         <div className="text-center w-full px-6">
           <motion.div 
             animate={{ opacity: [0.5, 1, 0.5] }}
-            transition={{ duration: 1.5, repeat: Infinity }}
-            className="text-xs font-heading font-bold text-primary tracking-[0.3em] mb-8"
+            transition={{ duration: 0.8, repeat: Infinity }}
+            className="text-xs font-heading font-bold tracking-[0.3em] mb-8"
+            style={{ color: isRecording ? "#ef4444" : isThinking ? "#fbbf24" : isPlaying ? "#a78bfa" : "#00e5ff" }}
           >
-            {isRecording ? "RECORDING ACTIVE" : isPlaying ? "AICHAT IS SPEAKING" : isProcessing ? "PROCESSING" : "STANDBY"}
+            {isRecording ? "🎙️ LISTENING" : isThinking ? "⚙️ THINKING" : isPlaying ? "🔊 SPEAKING" : "✓ READY"}
           </motion.div>
           
           {/* Audio Visualizer Mock */}

@@ -8,6 +8,7 @@ import { useAudioPlayback } from "./useAudioPlayback";
 interface StreamCallbacks {
   onUserTranscript?: (text: string) => void;
   onTranscript?: (text: string, full: string) => void;
+  onThinking?: (isThinking: boolean) => void;
   onComplete?: (transcript: string) => void;
   onError?: (error: Error) => void;
 }
@@ -61,10 +62,12 @@ export function useVoiceStream(callbacks: StreamCallbacks = {}) {
             switch (event.type) {
               case "user_transcript":
                 callbacks.onUserTranscript?.(event.data);
+                callbacks.onThinking?.(true);
                 break;
               case "transcript":
                 fullTranscript += event.data;
                 callbacks.onTranscript?.(event.data, fullTranscript);
+                callbacks.onThinking?.(false);
                 break;
               case "audio":
                 playback.pushAudio(event.data);
