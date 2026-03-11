@@ -99,11 +99,16 @@ export function useAuth() {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(updates),
+        credentials: "include",
       });
       if (!res.ok) throw new Error("Failed to update profile");
       return res.json();
     },
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["/api/me"] }),
+    onSuccess: (updatedUser) => {
+      // Update cache immediately with fresh data - don't refetch
+      queryClient.setQueryData(["/api/me"], updatedUser);
+      queryClient.removeQueries({ queryKey: ["/api/me"], type: "inactive" });
+    },
   });
 
   return {

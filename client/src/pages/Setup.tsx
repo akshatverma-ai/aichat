@@ -6,23 +6,47 @@ import { Layout } from "@/components/Layout";
 import { GlowingButton } from "@/components/GlowingButton";
 import { AVATARS, PERSONALITIES, cn } from "@/lib/utils";
 import { Check } from "lucide-react";
+import { useToast } from "@/hooks/use-toast";
 
 export default function Setup() {
   const { user, updateProfile } = useAuth();
   const [, setLocation] = useLocation();
+  const { toast } = useToast();
   
   const [selectedAvatar, setSelectedAvatar] = useState(user?.avatar || "avatar1");
   const [selectedPersonality, setSelectedPersonality] = useState(user?.personality || "Friendly");
+  const [error, setError] = useState("");
 
   const handleSave = async () => {
     try {
+      setError("");
+      
+      if (!selectedAvatar || !selectedPersonality) {
+        setError("Please select both avatar and personality");
+        toast({
+          title: "Configuration Incomplete",
+          description: "Please select both Visual Interface and Cognitive Matrix",
+          variant: "destructive",
+        });
+        return;
+      }
+
       await updateProfile.mutateAsync({
         avatar: selectedAvatar,
         personality: selectedPersonality,
       });
+      
+      // Redirect immediately - data is already cached
       setLocation("/home");
-    } catch (error) {
-      console.error(error);
+    } catch (error: any) {
+      const errorMsg = error.message || "Failed to save configuration";
+      setError(errorMsg);
+      console.error("Configuration error:", error);
+      toast({
+        title: "Configuration Failed",
+        description: errorMsg,
+        variant: "destructive",
+      });
     }
   };
 
@@ -79,13 +103,20 @@ export default function Setup() {
         </section>
 
         <div className="mt-auto pt-8">
+          {error && (
+            <div className="mb-4 p-3 bg-destructive/20 border border-destructive/50 rounded-lg text-destructive text-sm">
+              {error}
+            </div>
+          )}
           <GlowingButton 
             className="w-full" 
             size="lg" 
             onClick={handleSave}
             isLoading={updateProfile.isPending}
+            data-testid="button-confirm-parameters"
+            disabled={updateProfile.isPending}
           >
-            CONFIRM PARAMETERS
+            {updateProfile.isPending ? "PROCESSING..." : "CONFIRM PARAMETERS"}
           </GlowingButton>
         </div>
       </div>
