@@ -63,17 +63,25 @@ export function registerChatRoutes(app: Express): void {
   app.post("/api/conversations/:id/messages", async (req: Request, res: Response) => {
     try {
       const conversationId = parseInt(req.params.id);
-      const { content } = req.body;
+      const { content, voiceMode } = req.body;
 
       // Save user message
       await chatStorage.createMessage(conversationId, "user", content);
 
       // Get conversation history for context
       const messages = await chatStorage.getMessagesByConversation(conversationId);
-      const chatMessages = messages.map((m) => ({
+      const chatMessages: { role: "system" | "user" | "assistant"; content: string }[] = messages.map((m) => ({
         role: m.role as "user" | "assistant",
         content: m.content,
       }));
+
+      // For voice mode, prepend a system prompt for concise spoken responses
+      if (voiceMode) {
+        chatMessages.unshift({
+          role: "system",
+          content: "You are a helpful AI assistant in a voice conversation. Keep responses concise, natural, and conversational — ideally 1-3 sentences. Avoid lists, bullet points, markdown, or lengthy explanations. Speak directly and warmly as if talking to a person.",
+        });
+      }
 
       // Set up SSE
       res.setHeader("Content-Type", "text/event-stream");
@@ -85,7 +93,7 @@ export function registerChatRoutes(app: Express): void {
         model: "gpt-4o-mini",
         messages: chatMessages,
         stream: true,
-        max_completion_tokens: 2048,
+        max_completion_tokens: voiceMode ? 150 : 2048,
       });
 
       let fullResponse = "";
