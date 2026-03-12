@@ -8,7 +8,7 @@ export function useActiveConversation() {
   const { data: conversations, isLoading: isLoadingList } = useQuery<Conversation[]>({
     queryKey: ["/api/conversations"],
     queryFn: async () => {
-      const res = await fetch("/api/conversations");
+      const res = await fetch("/api/conversations", { credentials: "include" });
       if (!res.ok) throw new Error("Failed to fetch conversations");
       return res.json();
     },

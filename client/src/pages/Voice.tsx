@@ -7,15 +7,51 @@ import { useVoiceRecorder, useVoiceStream } from "../../replit_integrations/audi
 import { useAuth } from "@/hooks/use-auth";
 import { AVATARS } from "@/lib/utils";
 
+async function getOrCreateConversationId(): Promise<number> {
+  const listRes = await fetch("/api/conversations", { credentials: "include" });
+  if (listRes.ok) {
+    const list = await listRes.json();
+    if (list && list.length > 0) return list[0].id;
+  }
+  const createRes = await fetch("/api/conversations", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ title: "Main Session" }),
+    credentials: "include",
+  });
+  if (!createRes.ok) throw new Error("Failed to create conversation");
+  const conv = await createRes.json();
+  return conv.id;
+}
+
 export default function Voice() {
   const { id } = useParams();
-  const convId = parseInt(id || "0");
   const { user } = useAuth();
-  
-  const [transcript, setTranscript] = useState("Listening for your voice...");
+
+  const [convId, setConvId] = useState<number | null>(id ? parseInt(id) : null);
+  const [isReady, setIsReady] = useState(!!id);
+  const [transcript, setTranscript] = useState("Tap the mic to start...");
   const [isProcessing, setIsProcessing] = useState(false);
   const [isThinking, setIsThinking] = useState(false);
   const [autoListen, setAutoListen] = useState(true);
+
+  // Auto-discover conversation on mount
+  useEffect(() => {
+    if (convId) {
+      setIsReady(true);
+      return;
+    }
+    getOrCreateConversationId()
+      .then(id => {
+        setConvId(id);
+        setIsReady(true);
+        setTranscript("Listening for your voice...");
+      })
+      .catch(() => {
+        setIsReady(true);
+        setTranscript("Tap the mic to start...");
+      });
+  }, []);
 
   const recorder = useVoiceRecorder();
   const stream = useVoiceStream({
@@ -31,7 +67,7 @@ export default function Voice() {
         setTimeout(() => handleMicClick(), 800);
       }
     },
-    onError: (err) => {
+    onError: () => {
       setTranscript("Connection interrupted. Tap to retry.");
       setIsProcessing(false);
       setIsThinking(false);
@@ -39,6 +75,10 @@ export default function Voice() {
   });
 
   const handleMicClick = async () => {
+    if (!isReady || !convId) {
+      setTranscript("Still initializing, please wait...");
+      return;
+    }
     if (recorder.state === "recording") {
       const blob = await recorder.stopRecording();
       setIsProcessing(true);
@@ -73,10 +113,10 @@ export default function Voice() {
             className="text-xs font-heading font-bold tracking-[0.3em] mb-8"
             style={{ color: isRecording ? "#ef4444" : isThinking ? "#fbbf24" : isPlaying ? "#a78bfa" : "#00e5ff" }}
           >
-            {isRecording ? "🎙️ LISTENING" : isThinking ? "⚙️ THINKING" : isPlaying ? "🔊 SPEAKING" : "✓ READY"}
+            {!isReady ? "⌛ INITIALIZING" : isRecording ? "🎙️ LISTENING" : isThinking ? "⚙️ THINKING" : isPlaying ? "🔊 SPEAKING" : "✓ READY"}
           </motion.div>
           
-          {/* Audio Visualizer Mock */}
+          {/* Audio Visualizer */}
           <div className="h-24 flex items-center justify-center gap-1 mb-12">
             {[...Array(15)].map((_, i) => (
               <motion.div
@@ -115,7 +155,8 @@ export default function Voice() {
 
           <button
             onClick={handleMicClick}
-            disabled={isProcessing}
+            disabled={isProcessing || !isReady}
+            data-testid="button-mic"
             className={`relative z-10 w-24 h-24 rounded-full flex items-center justify-center transition-all duration-300 disabled:opacity-50 ${
               isRecording 
                 ? "bg-destructive text-white shadow-[0_0_40px_rgba(255,0,0,0.6)]" 

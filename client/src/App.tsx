@@ -39,13 +39,24 @@ function Router() {
       <Route path="/home">
         {() => <ProtectedRoute component={Home} />}
       </Route>
+
+      {/* Feature routes - with or without conversation ID */}
       <Route path="/chat/:id">
+        {() => <ProtectedRoute component={Chat} />}
+      </Route>
+      <Route path="/chat">
         {() => <ProtectedRoute component={Chat} />}
       </Route>
       <Route path="/voice/:id">
         {() => <ProtectedRoute component={Voice} />}
       </Route>
+      <Route path="/voice">
+        {() => <ProtectedRoute component={Voice} />}
+      </Route>
       <Route path="/camera">
+        {() => <ProtectedRoute component={Camera} />}
+      </Route>
+      <Route path="/assist">
         {() => <ProtectedRoute component={Camera} />}
       </Route>
       <Route path="/profile">

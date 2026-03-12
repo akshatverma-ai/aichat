@@ -1,46 +1,15 @@
-import { useEffect, useState } from "react";
 import { useLocation } from "wouter";
 import { motion } from "framer-motion";
 import { Layout } from "@/components/Layout";
 import { Mic, MessageSquare, Camera } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
-import { useActiveConversation } from "@/hooks/use-conversations";
 import { AVATARS } from "@/lib/utils";
 
 export default function Home() {
   const { user } = useAuth();
   const [, setLocation] = useLocation();
-  const { conversations, activeConversation, createConversation, isLoadingList } = useActiveConversation();
-  const [navigatingTo, setNavigatingTo] = useState<string | null>(null);
-  
-  const currentConvId = activeConversation?.id;
+
   const avatarUrl = user ? AVATARS[user.avatar as keyof typeof AVATARS] : AVATARS.avatar1;
-
-  // Only create conversation if none exist
-  useEffect(() => {
-    if (!isLoadingList && (!conversations || conversations.length === 0)) {
-      createConversation.mutate("Main Session");
-    }
-  }, [isLoadingList, conversations, createConversation]);
-
-  // Navigate to a feature with a conversation ID
-  const navigateTo = (path: string) => {
-    setNavigatingTo(path);
-    if (currentConvId) {
-      setLocation(`${path}/${currentConvId}`);
-    } else {
-      // Conversation should exist by now, but if not, try to create one
-      createConversation.mutate("Main Session", {
-        onSuccess: (newConv) => {
-          setLocation(`${path}/${newConv.id}`);
-          setNavigatingTo(null);
-        },
-        onError: () => {
-          setNavigatingTo(null);
-        },
-      });
-    }
-  };
 
   return (
     <Layout title="Aichat - Main Console" noPadding>
@@ -66,7 +35,6 @@ export default function Home() {
             transition={{ duration: 0.6 }}
             className="w-full h-full rounded-full overflow-hidden relative shadow-[0_0_50px_rgba(0,229,255,0.3)] z-10 border-2 border-primary/50"
           >
-            {/* futuristic portrait of a woman neon lighting cyberpunk */}
             <img 
               src={avatarUrl} 
               alt="Aichat" 
@@ -92,49 +60,34 @@ export default function Home() {
         {/* Action Grid */}
         <div className="w-full grid grid-cols-3 gap-4 px-2">
           <button
-            onClick={() => navigateTo('/chat')}
-            disabled={isLoadingList}
-            className="flex flex-col items-center justify-center gap-3 p-4 rounded-2xl glass-panel hover:bg-primary/10 transition-all group disabled:opacity-50 disabled:cursor-not-allowed"
+            onClick={() => setLocation('/chat')}
+            className="flex flex-col items-center justify-center gap-3 p-4 rounded-2xl glass-panel hover:bg-primary/10 transition-all group"
             data-testid="button-text-chat"
           >
             <div className="w-12 h-12 rounded-full bg-primary/20 flex items-center justify-center group-hover:scale-110 transition-transform">
-              {navigatingTo === '/chat' ? (
-                <div className="animate-spin h-6 w-6 border-2 border-primary border-t-transparent rounded-full" />
-              ) : (
-                <MessageSquare className="w-6 h-6 text-primary" />
-              )}
+              <MessageSquare className="w-6 h-6 text-primary" />
             </div>
             <span className="text-xs font-semibold text-white/70 group-hover:text-primary">TEXT</span>
           </button>
 
           <button
-            onClick={() => navigateTo('/voice')}
-            disabled={isLoadingList}
-            className="flex flex-col items-center justify-center gap-3 p-4 rounded-2xl glass-panel border-primary/50 hover:bg-primary/20 shadow-[0_0_20px_rgba(0,229,255,0.1)] transition-all group translate-y-[-10px] disabled:opacity-50 disabled:cursor-not-allowed"
+            onClick={() => setLocation('/voice')}
+            className="flex flex-col items-center justify-center gap-3 p-4 rounded-2xl glass-panel border-primary/50 hover:bg-primary/20 shadow-[0_0_20px_rgba(0,229,255,0.1)] transition-all group translate-y-[-10px]"
             data-testid="button-voice-chat"
           >
             <div className="w-16 h-16 rounded-full bg-primary flex items-center justify-center group-hover:scale-110 transition-transform shadow-[0_0_20px_rgba(0,229,255,0.5)]">
-              {navigatingTo === '/voice' ? (
-                <div className="animate-spin h-8 w-8 border-2 border-black border-t-transparent rounded-full" />
-              ) : (
-                <Mic className="w-8 h-8 text-black" />
-              )}
+              <Mic className="w-8 h-8 text-black" />
             </div>
             <span className="text-sm font-bold text-primary">VOICE</span>
           </button>
 
           <button
             onClick={() => setLocation('/camera')}
-            disabled={isLoadingList}
-            className="flex flex-col items-center justify-center gap-3 p-4 rounded-2xl glass-panel hover:bg-accent/10 transition-all group disabled:opacity-50 disabled:cursor-not-allowed"
+            className="flex flex-col items-center justify-center gap-3 p-4 rounded-2xl glass-panel hover:bg-accent/10 transition-all group"
             data-testid="button-visual-assist"
           >
             <div className="w-12 h-12 rounded-full bg-accent/20 flex items-center justify-center group-hover:scale-110 transition-transform">
-              {navigatingTo === '/camera' ? (
-                <div className="animate-spin h-6 w-6 border-2 border-accent border-t-transparent rounded-full" />
-              ) : (
-                <Camera className="w-6 h-6 text-accent" />
-              )}
+              <Camera className="w-6 h-6 text-accent" />
             </div>
             <span className="text-xs font-semibold text-white/70 group-hover:text-accent">ASSIST</span>
           </button>

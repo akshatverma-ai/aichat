@@ -1,7 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import { useParams } from "wouter";
 import { Layout } from "@/components/Layout";
-import { useConversationDetails } from "@/hooks/use-conversations";
 import { Send, Loader2 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { cn } from "@/lib/utils";
@@ -13,21 +12,65 @@ type LocalMessage = {
   isStreaming?: boolean;
 };
 
+async function getOrCreateConversationId(): Promise<number> {
+  // Try to fetch existing conversations
+  const listRes = await fetch("/api/conversations", { credentials: "include" });
+  if (listRes.ok) {
+    const list = await listRes.json();
+    if (list && list.length > 0) return list[0].id;
+  }
+  // Create a new one
+  const createRes = await fetch("/api/conversations", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ title: "Main Session" }),
+    credentials: "include",
+  });
+  if (!createRes.ok) throw new Error("Failed to create conversation");
+  const conv = await createRes.json();
+  return conv.id;
+}
+
 export default function Chat() {
   const { id } = useParams();
-  const convId = parseInt(id || "0");
-  const { data: conversation, isLoading } = useConversationDetails(convId);
-  
+  const [convId, setConvId] = useState<number | null>(id ? parseInt(id) : null);
+  const [isReady, setIsReady] = useState(!!id);
   const [messages, setMessages] = useState<LocalMessage[]>([]);
   const [input, setInput] = useState("");
   const [isSending, setIsSending] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
 
+  // Auto-discover conversation if no ID provided
   useEffect(() => {
-    if (conversation?.messages) {
-      setMessages(conversation.messages.map(m => ({ ...m, id: m.id })));
+    if (convId) {
+      // Load existing messages
+      fetch(`/api/conversations/${convId}`, { credentials: "include" })
+        .then(r => r.ok ? r.json() : null)
+        .then(data => {
+          if (data?.messages) {
+            setMessages(data.messages.map((m: any) => ({ ...m })));
+          }
+          setIsReady(true);
+        })
+        .catch(() => setIsReady(true));
+      return;
     }
-  }, [conversation]);
+    // No ID — find or create
+    getOrCreateConversationId()
+      .then(id => {
+        setConvId(id);
+        // Load existing messages for this conversation
+        return fetch(`/api/conversations/${id}`, { credentials: "include" });
+      })
+      .then(r => r && r.ok ? r.json() : null)
+      .then(data => {
+        if (data?.messages) {
+          setMessages(data.messages.map((m: any) => ({ ...m })));
+        }
+        setIsReady(true);
+      })
+      .catch(() => setIsReady(true));
+  }, []);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -35,10 +78,7 @@ export default function Chat() {
 
   const handleSend = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!input.trim() || isSending || !convId) {
-      console.warn("Send blocked:", { input: !!input.trim(), sending: isSending, convId });
-      return;
-    }
+    if (!input.trim() || isSending || !convId) return;
 
     const userMsg: LocalMessage = { id: Date.now(), role: "user", content: input };
     setMessages(prev => [...prev, userMsg]);
@@ -53,6 +93,7 @@ export default function Chat() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ content: userMsg.content }),
+        credentials: "include",
       });
 
       if (!res.body) throw new Error("No body");
@@ -70,7 +111,6 @@ export default function Chat() {
 
         for (const line of lines) {
           if (!line.trim() || !line.startsWith("data: ")) continue;
-          
           try {
             const data = JSON.parse(line.slice(6));
             if (data.content) {
@@ -84,7 +124,7 @@ export default function Chat() {
               ));
             }
           } catch (err) {
-            console.error("Parse error:", err);
+            // ignore parse errors
           }
         }
       }
@@ -102,14 +142,20 @@ export default function Chat() {
     <Layout title="Aichat - Text Chat" showBack noPadding>
       <div className="flex-1 flex flex-col h-full pt-20 pb-4 px-4 relative">
         <div className="flex-1 overflow-y-auto hide-scrollbar space-y-6 pb-20">
-          {isLoading && (
+          {!isReady && (
             <div className="flex justify-center py-10">
               <Loader2 className="w-8 h-8 text-primary animate-spin" />
             </div>
           )}
           
+          {isReady && messages.length === 0 && (
+            <div className="flex justify-center py-10">
+              <p className="text-white/30 text-sm font-heading tracking-wider">NEURAL LINK ESTABLISHED — BEGIN TRANSMISSION</p>
+            </div>
+          )}
+
           <AnimatePresence initial={false}>
-            {messages.map((msg, idx) => (
+            {messages.map((msg) => (
               <motion.div
                 key={msg.id}
                 initial={{ opacity: 0, y: 10 }}
@@ -146,13 +192,13 @@ export default function Chat() {
               type="text"
               value={input}
               onChange={(e) => setInput(e.target.value)}
-              placeholder="Transmit message..."
+              placeholder={isReady ? "Transmit message..." : "Initializing..."}
               className="w-full bg-black/60 border border-white/20 rounded-full py-4 pl-6 pr-14 text-white placeholder:text-white/40 focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary backdrop-blur-xl shadow-lg"
-              disabled={isSending}
+              disabled={isSending || !isReady}
             />
             <button
               type="submit"
-              disabled={!input.trim() || isSending}
+              disabled={!input.trim() || isSending || !isReady}
               className="absolute right-2 w-10 h-10 rounded-full bg-primary text-black flex items-center justify-center disabled:opacity-50 hover:shadow-[0_0_15px_rgba(0,229,255,0.5)] transition-all"
             >
               {isSending ? <Loader2 className="w-5 h-5 animate-spin" /> : <Send className="w-5 h-5 ml-1" />}

@@ -122,6 +122,38 @@ const result = await generateVideo({
 console.log(`Video saved to: ${result.filePath}`);
 ```
 
+### generateVideoAsync(prompt, ...)
+
+Generate a video asynchronously in the background. Returns immediately with a workflow ID.
+
+**Parameters:**
+
+- `prompt` (str, required): Detailed text description of the desired video
+- `summary` (str, default "generated_video"): Short description for the filename
+- `aspectRatio` (str, default "16:9"): "16:9" (landscape) or "9:16" (portrait)
+- `resolution` (str, default "720p"): "720p" or "1080p"
+- `durationSeconds` (int, default 6): 4, 6, or 8 seconds
+- `negativePrompt` (str, optional): Description of what should NOT appear
+- `personGeneration` (str, optional): "dont_allow" or "allow_adult" for controlling people
+
+**Returns:** Dict with `workflowId`, `workflowAlias`, `status`, and `videoPath`
+
+**Example:**
+
+```javascript
+const result = await generateVideoAsync({
+    prompt: "A cat playing with a ball of yarn, cute and playful, natural lighting",
+    summary: "playful cat",
+    aspectRatio: "16:9",
+    durationSeconds: 6
+});
+console.log(`Started workflow: ${result.workflowAlias}`);
+console.log(`Video will be saved to: ${result.videoPath}`);
+
+// Later, wait for completion
+await wait_for_background_tasks({ wait_mode: "all" });
+```
+
 ### stockImage(description, ...)
 
 Retrieve stock images matching a description from a stock image provider.
@@ -159,8 +191,9 @@ for (const path of result.filePaths) {
 - Creative or artistic content
 - Use `generateImageAsync` when images are not needed immediately
 
-### generateVideo
+### generateVideo / generateVideoAsync
 
+- Use `generateVideoAsync` when the video is not needed immediately
 - Short animated clips or motion graphics
 - Video backgrounds or visual effects
 - Product animations or demonstrations
