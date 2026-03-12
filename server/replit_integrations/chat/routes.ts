@@ -63,7 +63,7 @@ export function registerChatRoutes(app: Express): void {
   app.post("/api/conversations/:id/messages", async (req: Request, res: Response) => {
     try {
       const conversationId = parseInt(req.params.id);
-      const { content, voiceMode } = req.body;
+      const { content, voiceMode, detectedLang, detectedLangName } = req.body;
 
       // Save user message
       await chatStorage.createMessage(conversationId, "user", content);
@@ -75,11 +75,21 @@ export function registerChatRoutes(app: Express): void {
         content: m.content,
       }));
 
-      // For voice mode, prepend a system prompt for concise spoken responses
+      // For voice mode, prepend a multilingual system prompt for concise spoken responses
       if (voiceMode) {
+        const langHint = detectedLangName && detectedLang
+          ? `The user is speaking ${detectedLangName} (${detectedLang}). You MUST reply in ${detectedLangName}. `
+          : "";
         chatMessages.unshift({
           role: "system",
-          content: "You are a helpful AI assistant in a voice conversation. Keep responses concise, natural, and conversational — ideally 1-3 sentences. Avoid lists, bullet points, markdown, or lengthy explanations. Speak directly and warmly as if talking to a person.",
+          content:
+            `You are Aichat, a friendly voice assistant. ` +
+            `${langHint}` +
+            `Always reply in the exact same language the user uses — if they speak Hindi, reply in Hindi; ` +
+            `if English, reply in English; if Hinglish (mixed Hindi-English), reply in Hinglish. ` +
+            `Keep responses concise and conversational — ideally 1–3 sentences. ` +
+            `Avoid lists, bullet points, markdown, or lengthy explanations. ` +
+            `Speak naturally and warmly as if talking to a person face-to-face.`,
         });
       }
 
