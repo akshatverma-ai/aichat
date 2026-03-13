@@ -8,10 +8,9 @@ import { AVATARS } from "@/lib/utils";
 
 type Phase = "idle" | "listening" | "thinking" | "speaking";
 
-// ── Language detection by Unicode script ────────────────────────────────
 interface LangInfo {
-  code: string;   // BCP-47 for SpeechRecognition / SpeechSynthesis
-  name: string;   // human label for display
+  code: string;
+  name: string;
 }
 
 function detectLanguage(text: string): LangInfo {
@@ -28,27 +27,21 @@ function detectLanguage(text: string): LangInfo {
   return { code: "en-US", name: "English" };
 }
 
-// ── Best TTS voice for a language ────────────────────────────────────────
 function getBestVoice(langCode: string): SpeechSynthesisVoice | null {
   const voices = speechSynthesis.getVoices();
-  const lang2 = langCode.slice(0, 2); // "hi", "en", "ar" …
-
-  // Prefer Google voices first (highest quality), then any matching lang
+  const lang2 = langCode.slice(0, 2);
   return (
     voices.find((v) => v.name.toLowerCase().includes("google") && v.lang === langCode) ||
     voices.find((v) => v.name.toLowerCase().includes("google") && v.lang.startsWith(lang2)) ||
     voices.find((v) => v.lang === langCode) ||
     voices.find((v) => v.lang.startsWith(lang2)) ||
-    // Female-sounding voices as fallback for English
     (lang2 === "en" ? voices.find((v) => /female|zira|hazel|samantha|karen|moira|fiona/i.test(v.name)) : null) ||
     voices[0] ||
     null
   );
 }
 
-// ── Split text into speakable sentences for natural pauses ───────────────
 function splitSentences(text: string): string[] {
-  // Split on sentence-ending punctuation while keeping the punctuation
   const raw = text.match(/[^.!?]+[.!?]+|[^.!?]+$/g) || [text];
   return raw.map((s) => s.trim()).filter(Boolean);
 }
@@ -66,12 +59,15 @@ export default function Voice() {
   const [active, setActive] = useState(false);
   const [detectedLangName, setDetectedLangName] = useState("English");
 
-  // All mutable runtime state lives in refs — no closure issues
   const convIdRef = useRef<number | null>(id ? parseInt(id) : null);
   const phaseRef = useRef<Phase>("idle");
   const activeRef = useRef(false);
   const recognitionRef = useRef<any>(null);
   const detectedLangRef = useRef<LangInfo>({ code: "en-US", name: "English" });
+  // Chrome SpeechSynthesis keepalive interval
+  const synthKeepAliveRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // Watchdog to detect when onend doesn't fire
+  const synthWatchdogRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const avatarUrl = user ? AVATARS[user.avatar as keyof typeof AVATARS] : AVATARS.avatar1;
 
@@ -80,26 +76,52 @@ export default function Voice() {
     setPhase(p);
   }
 
-  // ── SpeechSynthesis with sentence splitting ──────────────────────────
+  function clearSynthTimers() {
+    if (synthKeepAliveRef.current) {
+      clearInterval(synthKeepAliveRef.current);
+      synthKeepAliveRef.current = null;
+    }
+    if (synthWatchdogRef.current) {
+      clearTimeout(synthWatchdogRef.current);
+      synthWatchdogRef.current = null;
+    }
+  }
+
+  function onSpeechDone() {
+    clearSynthTimers();
+    if (activeRef.current) {
+      setTimeout(() => listen(), 450);
+    } else {
+      go("idle");
+    }
+  }
+
   function speak(text: string) {
     speechSynthesis.cancel();
+    clearSynthTimers();
 
     const lang = detectedLangRef.current.code;
     const sentences = splitSentences(text);
-    if (sentences.length === 0) { go("idle"); return; }
+    if (sentences.length === 0) { onSpeechDone(); return; }
 
     go("speaking");
 
+    // Chrome fix: resume synthesis every 5s to prevent auto-pause bug
+    synthKeepAliveRef.current = setInterval(() => {
+      if (speechSynthesis.paused) speechSynthesis.resume();
+    }, 5000);
+
+    let currentIndex = 0;
+    let onEndFired = false;
+
     const speakNext = (index: number) => {
       if (index >= sentences.length) {
-        // All sentences spoken
-        if (activeRef.current) {
-          setTimeout(() => listen(), 450);
-        } else {
-          go("idle");
-        }
+        onSpeechDone();
         return;
       }
+
+      currentIndex = index;
+      onEndFired = false;
 
       const utter = new SpeechSynthesisUtterance(sentences[index]);
       utter.lang = lang;
@@ -110,13 +132,37 @@ export default function Voice() {
       const voice = getBestVoice(lang);
       if (voice) utter.voice = voice;
 
+      // Estimate fallback timeout: ~130 chars/sec + 1.5s buffer
+      const estimatedMs = (sentences[index].length / 130) * 1000 + 1500;
+
+      utter.onstart = () => {
+        // Set a watchdog in case onend doesn't fire (Chrome bug)
+        if (synthWatchdogRef.current) clearTimeout(synthWatchdogRef.current);
+        synthWatchdogRef.current = setTimeout(() => {
+          if (!onEndFired) {
+            speakNext(currentIndex + 1);
+          }
+        }, estimatedMs);
+      };
+
       utter.onend = () => {
-        // Small natural pause between sentences (80ms)
+        onEndFired = true;
+        if (synthWatchdogRef.current) {
+          clearTimeout(synthWatchdogRef.current);
+          synthWatchdogRef.current = null;
+        }
         setTimeout(() => speakNext(index + 1), 80);
       };
-      utter.onerror = () => {
-        // On error, try next sentence
-        speakNext(index + 1);
+
+      utter.onerror = (e) => {
+        onEndFired = true;
+        if (synthWatchdogRef.current) {
+          clearTimeout(synthWatchdogRef.current);
+          synthWatchdogRef.current = null;
+        }
+        if (e.error !== "interrupted") {
+          speakNext(index + 1);
+        }
       };
 
       speechSynthesis.speak(utter);
@@ -125,12 +171,10 @@ export default function Voice() {
     speakNext(0);
   }
 
-  // ── AI API call ──────────────────────────────────────────────────────
   async function askAI(text: string) {
     const convId = convIdRef.current;
     if (!convId) { go("idle"); return; }
 
-    // Detect language from the transcript
     const lang = detectLanguage(text);
     detectedLangRef.current = lang;
     setDetectedLangName(lang.name);
@@ -141,12 +185,7 @@ export default function Voice() {
       const res = await fetch(`/api/conversations/${convId}/messages`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          content: text,
-          voiceMode: true,
-          detectedLang: lang.code,
-          detectedLangName: lang.name,
-        }),
+        body: JSON.stringify({ content: text }),
         credentials: "include",
       });
 
@@ -187,17 +226,16 @@ export default function Voice() {
     }
   }
 
-  // ── SpeechRecognition ────────────────────────────────────────────────
   function listen() {
     const SR =
       (window as any).SpeechRecognition ||
       (window as any).webkitSpeechRecognition;
 
-    if (!SR || !convIdRef.current) return;
+    if (!SR) { setSupported(false); go("idle"); return; }
+    if (!convIdRef.current) { go("idle"); return; }
     if (phaseRef.current === "listening") return;
 
     const rec = new SR();
-    // Use current detected language for recognition; fallback en-US
     rec.lang = detectedLangRef.current.code || "en-US";
     rec.continuous = false;
     rec.interimResults = true;
@@ -241,6 +279,9 @@ export default function Voice() {
       const recoverable = e.error === "no-speech" || e.error === "aborted";
       if (recoverable && activeRef.current && phaseRef.current === "listening") {
         setTimeout(() => listen(), 300);
+      } else if (e.error === "not-allowed" || e.error === "service-not-allowed") {
+        setSupported(false);
+        go("idle");
       } else {
         console.error("Recognition error:", e.error);
         go("idle");
@@ -255,10 +296,10 @@ export default function Voice() {
     }
   }
 
-  // ── Stop everything ──────────────────────────────────────────────────
   function stopAll() {
     activeRef.current = false;
     setActive(false);
+    clearSynthTimers();
     if (recognitionRef.current) {
       try { recognitionRef.current.abort(); } catch {}
       recognitionRef.current = null;
@@ -268,13 +309,13 @@ export default function Voice() {
     setInterimText("");
   }
 
-  // ── Button handler ───────────────────────────────────────────────────
   function handleButtonClick() {
     if (!ready || !supported) return;
     if (phaseRef.current === "thinking") return;
 
     if (phaseRef.current === "speaking") {
       speechSynthesis.cancel();
+      clearSynthTimers();
       if (!activeRef.current) { activeRef.current = true; setActive(true); }
       setTimeout(() => listen(), 100);
       return;
@@ -291,7 +332,6 @@ export default function Voice() {
     listen();
   }
 
-  // ── Init ─────────────────────────────────────────────────────────────
   useEffect(() => {
     const SR =
       (window as any).SpeechRecognition ||
@@ -335,12 +375,12 @@ export default function Voice() {
 
     return () => {
       activeRef.current = false;
+      clearSynthTimers();
       if (recognitionRef.current) { try { recognitionRef.current.abort(); } catch {} }
       speechSynthesis.cancel();
     };
   }, []);
 
-  // ── Visuals ──────────────────────────────────────────────────────────
   const color =
     phase === "listening" ? "#ef4444"
     : phase === "thinking" ? "#fbbf24"
@@ -349,6 +389,7 @@ export default function Voice() {
 
   const label =
     !ready ? "⌛ INITIALIZING"
+    : !supported ? "⚠ NOT SUPPORTED — USE CHROME"
     : phase === "listening" ? "🎙️ LISTENING"
     : phase === "thinking"  ? "⚙️  THINKING"
     : phase === "speaking"  ? "🔊 SPEAKING"
@@ -366,7 +407,7 @@ export default function Voice() {
       : userText
       ? `"${userText}"`
       : !supported
-      ? "Voice recognition is not supported in this browser. Try Chrome."
+      ? "Voice recognition is not supported in this browser. Please use Chrome or Edge."
       : "Tap the mic button to start talking";
 
   const panelTag =
@@ -377,12 +418,10 @@ export default function Voice() {
 
   return (
     <Layout title="Aichat - Voice Chat" showBack>
-      <div className="flex-1 flex flex-col items-center justify-between py-8 px-4 relative">
+      <div className="flex-1 flex flex-col items-center justify-between py-6 px-4 relative">
 
         <div className="w-full text-center">
-
-          {/* State + language badge row */}
-          <div className="flex items-center justify-center gap-3 mb-6">
+          <div className="flex items-center justify-center gap-3 mb-5">
             <motion.p
               animate={{ opacity: [0.55, 1, 0.55] }}
               transition={{ duration: 1.3, repeat: Infinity }}
@@ -399,7 +438,7 @@ export default function Voice() {
           </div>
 
           {/* Waveform bars */}
-          <div className="h-20 flex items-center justify-center gap-[3px] mb-8">
+          <div className="h-16 flex items-center justify-center gap-[3px] mb-6">
             {Array.from({ length: 24 }, (_, i) => (
               <motion.div
                 key={i}
@@ -415,7 +454,7 @@ export default function Voice() {
                   delay: i * 0.04,
                   ease: "easeInOut",
                 }}
-                className="w-[6px] h-16 rounded-full origin-center"
+                className="w-[5px] h-14 rounded-full origin-center"
                 style={{
                   background:
                     phase === "speaking"
@@ -434,7 +473,7 @@ export default function Voice() {
           </div>
 
           {/* Transcript panel */}
-          <div className="glass-panel rounded-2xl p-5 min-h-[130px] flex flex-col items-start justify-center text-left relative overflow-hidden">
+          <div className="glass-panel rounded-2xl p-4 min-h-[110px] flex flex-col items-start justify-center text-left relative overflow-hidden">
             {panelTag && (
               <span
                 className="text-[10px] font-heading font-bold tracking-widest mb-2"
@@ -478,7 +517,7 @@ export default function Voice() {
         </div>
 
         {/* Controls */}
-        <div className="flex flex-col items-center gap-4 mt-8 relative">
+        <div className="flex flex-col items-center gap-4 mt-6 relative">
           <div className="absolute inset-0 flex items-center justify-center pointer-events-none opacity-10 scale-[2.2] blur-xl">
             <img src={avatarUrl} alt="" className="w-full h-full object-cover rounded-full mix-blend-screen" />
           </div>
@@ -496,7 +535,7 @@ export default function Voice() {
                 : { boxShadow: "0 0 30px rgba(0,229,255,0.35)" }
             }
             transition={{ duration: 1.3, repeat: Infinity }}
-            className={`relative z-10 w-28 h-28 rounded-full flex items-center justify-center transition-colors duration-300 disabled:opacity-35 disabled:cursor-not-allowed ${
+            className={`relative z-10 w-24 h-24 rounded-full flex items-center justify-center transition-colors duration-300 disabled:opacity-35 disabled:cursor-not-allowed ${
               phase === "listening" ? "bg-red-500 text-white"
               : phase === "speaking" ? "bg-violet-500 text-white"
               : phase === "thinking" ? "bg-yellow-500 text-black"
@@ -504,15 +543,15 @@ export default function Voice() {
             }`}
           >
             {phase === "listening" ? (
-              <Square className="w-9 h-9 fill-current" />
+              <Square className="w-8 h-8 fill-current" />
             ) : phase === "thinking" ? (
-              <Loader2 className="w-9 h-9 animate-spin" />
+              <Loader2 className="w-8 h-8 animate-spin" />
             ) : (
-              <Mic className="w-10 h-10" />
+              <Mic className="w-9 h-9" />
             )}
           </motion.button>
 
-          <p className="text-white/35 text-[11px] font-heading tracking-wider z-10 select-none">
+          <p className="text-white/35 text-[11px] font-heading tracking-wider z-10 select-none text-center">
             {phase === "listening" ? "Tap to stop"
             : phase === "speaking" ? "Tap to interrupt & speak"
             : phase === "thinking" ? "Generating response..."

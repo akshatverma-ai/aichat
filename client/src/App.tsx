@@ -1,4 +1,5 @@
-import { Switch, Route, Redirect } from "wouter";
+import { Switch, Route, Redirect, Router } from "wouter";
+import { useHashLocation } from "wouter/use-hash-location";
 import { queryClient } from "./lib/queryClient";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
@@ -19,20 +20,19 @@ import NotFound from "@/pages/not-found";
 // Auth Guard Component
 function ProtectedRoute({ component: Component, ...rest }: any) {
   const { user, isLoading } = useAuth();
-  
+
   if (isLoading) return <Splash />;
   if (!user) return <Redirect to="/login" />;
-  
+
   return <Component {...rest} />;
 }
 
-function Router() {
+function AppRouter() {
   return (
     <Switch>
       <Route path="/" component={Splash} />
       <Route path="/login" component={Login} />
-      
-      {/* Protected Routes */}
+
       <Route path="/setup">
         {() => <ProtectedRoute component={Setup} />}
       </Route>
@@ -40,7 +40,6 @@ function Router() {
         {() => <ProtectedRoute component={Home} />}
       </Route>
 
-      {/* Feature routes - with or without conversation ID */}
       <Route path="/chat/:id">
         {() => <ProtectedRoute component={Chat} />}
       </Route>
@@ -53,10 +52,10 @@ function Router() {
       <Route path="/voice">
         {() => <ProtectedRoute component={Voice} />}
       </Route>
-      <Route path="/camera">
+      <Route path="/assist">
         {() => <ProtectedRoute component={Camera} />}
       </Route>
-      <Route path="/assist">
+      <Route path="/camera">
         {() => <ProtectedRoute component={Camera} />}
       </Route>
       <Route path="/profile">
@@ -73,7 +72,9 @@ function App() {
     <QueryClientProvider client={queryClient}>
       <TooltipProvider>
         <Toaster />
-        <Router />
+        <Router hook={useHashLocation}>
+          <AppRouter />
+        </Router>
       </TooltipProvider>
     </QueryClientProvider>
   );

@@ -6,60 +6,9 @@ import { openai, speechToText, ensureCompatibleFormat } from "./client";
 const audioBodyParser = express.json({ limit: "50mb" });
 
 export function registerAudioRoutes(app: Express): void {
-  // Get all conversations
-  app.get("/api/conversations", async (req: Request, res: Response) => {
-    try {
-      const conversations = await chatStorage.getAllConversations();
-      res.json(conversations);
-    } catch (error) {
-      console.error("Error fetching conversations:", error);
-      res.status(500).json({ error: "Failed to fetch conversations" });
-    }
-  });
-
-  // Get single conversation with messages
-  app.get("/api/conversations/:id", async (req: Request, res: Response) => {
-    try {
-      const id = parseInt(req.params.id);
-      const conversation = await chatStorage.getConversation(id);
-      if (!conversation) {
-        return res.status(404).json({ error: "Conversation not found" });
-      }
-      const messages = await chatStorage.getMessagesByConversation(id);
-      res.json({ ...conversation, messages });
-    } catch (error) {
-      console.error("Error fetching conversation:", error);
-      res.status(500).json({ error: "Failed to fetch conversation" });
-    }
-  });
-
-  // Create new conversation (userId is optional for backwards compatibility)
-  app.post("/api/conversations", async (req: Request, res: Response) => {
-    try {
-      const { title } = req.body;
-      const userId = (req as any).session?.userId;
-      const conversation = await chatStorage.createConversation(title || "New Chat", userId);
-      res.status(201).json(conversation);
-    } catch (error) {
-      console.error("Error creating conversation:", error);
-      res.status(500).json({ error: "Failed to create conversation" });
-    }
-  });
-
-  // Delete conversation
-  app.delete("/api/conversations/:id", async (req: Request, res: Response) => {
-    try {
-      const id = parseInt(req.params.id);
-      await chatStorage.deleteConversation(id);
-      res.status(204).send();
-    } catch (error) {
-      console.error("Error deleting conversation:", error);
-      res.status(500).json({ error: "Failed to delete conversation" });
-    }
-  });
-
-  // Send message (text or voice) and get AI response
-  // Handles both text chat and voice conversation
+  // Send message (text or voice) and get AI response via SSE stream.
+  // Text mode: body = { content: string }
+  // Voice mode: body = { audio: base64string, voice?: string }
   app.post("/api/conversations/:id/messages", audioBodyParser, async (req: Request, res: Response) => {
     try {
       const conversationId = parseInt(req.params.id);
@@ -71,29 +20,28 @@ export function registerAudioRoutes(app: Express): void {
 
       let userMessage = content;
 
-      // 1. If audio provided, transcribe it
+      // If audio provided, transcribe it first
       if (audio) {
         const rawBuffer = Buffer.from(audio, "base64");
         const { buffer: audioBuffer, format: inputFormat } = await ensureCompatibleFormat(rawBuffer);
         userMessage = await speechToText(audioBuffer, inputFormat);
       }
 
-      // 2. Save user message
+      // Save user message
       await chatStorage.createMessage(conversationId, "user", userMessage);
 
-      // 3. Get conversation history
+      // Get conversation history for context
       const existingMessages = await chatStorage.getMessagesByConversation(conversationId);
       const chatHistory = existingMessages.map((m) => ({
         role: m.role as "user" | "assistant",
         content: m.content,
       }));
 
-      // 4. Set up SSE
+      // Set up SSE
       res.setHeader("Content-Type", "text/event-stream");
       res.setHeader("Cache-Control", "no-cache");
       res.setHeader("Connection", "keep-alive");
 
-      // 5. Stream response based on whether audio was provided
       if (audio) {
         // Voice mode: use gpt-audio model with streaming audio
         res.write(`data: ${JSON.stringify({ type: "user_transcript", data: userMessage })}\n\n`);
@@ -125,11 +73,14 @@ export function registerAudioRoutes(app: Express): void {
         await chatStorage.createMessage(conversationId, "assistant", assistantTranscript);
         res.write(`data: ${JSON.stringify({ type: "done" })}\n\n`);
       } else {
-        // Text mode: use regular streaming chat completions
+        // Text mode: streaming chat completions
         const stream = await openai.chat.completions.create({
           model: "gpt-4o-mini",
           messages: [
-            { role: "system", content: "You are Aichat, a helpful AI assistant. Be concise and conversational. Respond in 2-3 sentences when possible." },
+            {
+              role: "system",
+              content: "You are Aichat, a helpful AI assistant. Be concise and conversational. Respond in 2-3 sentences when possible.",
+            },
             ...chatHistory,
           ],
           stream: true,
