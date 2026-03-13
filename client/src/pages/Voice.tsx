@@ -163,8 +163,8 @@ export default function Voice() {
 
     const utter = new SpeechSynthesisUtterance(text);
     utter.lang = lang;
-    utter.rate = isHindi ? 0.9 : 0.95;
-    utter.pitch = isHindi ? 1.0 : 1.05;
+    utter.rate = isHindi ? 0.88 : 1.0;
+    utter.pitch = 1.0;
     utter.volume = 1;
     if (selectedVoice) utter.voice = selectedVoice;
 
@@ -462,8 +462,10 @@ export default function Voice() {
     // Reset accumulator for this session
     finalAccumRef.current = "";
 
-    // After this much silence, stop and submit
-    const SILENCE_MS = 1400;
+    // Silence durations: shorter when sentence clearly ends with punctuation
+    const SILENCE_DEFAULT = 1000;
+    const SILENCE_PUNCTUATED = 600;
+    const SENTENCE_END_RE = /[.!?।]+\s*$/;
 
     const stopAndSubmit = () => {
       clearSilenceTimer();
@@ -482,9 +484,11 @@ export default function Voice() {
       clearSilenceTimer();
 
       let interim = "";
+      let gotFinal = false;
       for (let i = e.resultIndex; i < e.results.length; i++) {
         if (e.results[i].isFinal) {
           finalAccumRef.current += e.results[i][0].transcript + " ";
+          gotFinal = true;
         } else {
           interim += e.results[i][0].transcript;
         }
@@ -495,8 +499,10 @@ export default function Voice() {
       const accumulated = finalAccumRef.current.trim();
       if (accumulated) setUserText(accumulated);
 
-      // Restart silence timer — submit after user pauses
-      silenceTimerRef.current = setTimeout(stopAndSubmit, SILENCE_MS);
+      // Use shorter silence window when sentence is clearly complete
+      const endsClean = gotFinal && SENTENCE_END_RE.test(accumulated);
+      const silenceMs = endsClean ? SILENCE_PUNCTUATED : SILENCE_DEFAULT;
+      silenceTimerRef.current = setTimeout(stopAndSubmit, silenceMs);
     };
 
     rec.onend = () => {
