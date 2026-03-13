@@ -1,9 +1,20 @@
 import OpenAI from "openai";
 import { textToSpeech } from "../audio/client";
 
-const openai = new OpenAI({
-  apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
-  baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
+let _openai: OpenAI | null = null;
+function getOpenAI(): OpenAI {
+  if (!_openai) {
+    _openai = new OpenAI({
+      apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.OPENAI_API_KEY,
+      baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
+    });
+  }
+  return _openai;
+}
+const openai = new Proxy({} as OpenAI, {
+  get(_target, prop) {
+    return (getOpenAI() as any)[prop];
+  },
 });
 
 export async function detectAndExplainObject(imageBase64: string): Promise<{
