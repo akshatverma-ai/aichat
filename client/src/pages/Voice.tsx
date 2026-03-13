@@ -50,17 +50,52 @@ function detectLanguage(text: string): LangInfo {
   return { code: "en-US", name: "English", recLang: "en-US" };
 }
 
-function getBestVoice(langCode: string): SpeechSynthesisVoice | null {
+/** Detect the script/language of a given text string (for AI response). */
+function detectResponseLang(text: string): string {
+  if (/[\u0900-\u097F]/.test(text)) return "hi-IN";
+  if (/[\u0600-\u06FF]/.test(text)) return "ar-SA";
+  if (/[\u4E00-\u9FFF]/.test(text)) return "zh-CN";
+  if (/[\u3040-\u30FF]/.test(text)) return "ja-JP";
+  if (/[\uAC00-\uD7AF]/.test(text)) return "ko-KR";
+  if (/[\u0A00-\u0A7F]/.test(text)) return "pa-IN";
+  if (/[\u0B80-\u0BFF]/.test(text)) return "ta-IN";
+  if (/[\u0C00-\u0C7F]/.test(text)) return "te-IN";
+  if (/[\u0D00-\u0D7F]/.test(text)) return "ml-IN";
+  if (/[\u0980-\u09FF]/.test(text)) return "bn-IN";
+  return "en-US";
+}
+
+/** Get the best available TTS voice for a BCP-47 language tag. */
+function getBestVoice(bcp47: string): SpeechSynthesisVoice | null {
   const voices = speechSynthesis.getVoices();
-  // Hinglish: prefer a Hindi voice so pronunciation sounds natural
-  const effectiveLang = langCode === "hinglish" ? "hi-IN" : langCode;
-  const lang2 = effectiveLang.slice(0, 2);
+  if (!voices.length) return null;
+
+  const lang2 = bcp47.slice(0, 2).toLowerCase();
+  const isHindi = bcp47 === "hi-IN";
+
+  if (isHindi) {
+    // Priority chain specifically for Hindi clarity
+    return (
+      // 1. Google's dedicated Hindi voice (best quality)
+      voices.find((v) => v.lang === "hi-IN" && v.name.toLowerCase().includes("google")) ||
+      // 2. Any native hi-IN voice
+      voices.find((v) => v.lang === "hi-IN") ||
+      // 3. Any voice whose lang starts with "hi"
+      voices.find((v) => v.lang.toLowerCase().startsWith("hi")) ||
+      // 4. Microsoft Hindi voice (Windows)
+      voices.find((v) => /hindi|hemant|kalpana/i.test(v.name)) ||
+      // 5. Absolute fallback: first available voice
+      voices[0] ||
+      null
+    );
+  }
+
   return (
-    voices.find((v) => v.name.toLowerCase().includes("google") && v.lang === effectiveLang) ||
-    voices.find((v) => v.name.toLowerCase().includes("google") && v.lang.startsWith(lang2)) ||
-    voices.find((v) => v.lang === effectiveLang) ||
-    voices.find((v) => v.lang.startsWith(lang2)) ||
-    (lang2 === "en" ? voices.find((v) => /female|zira|hazel|samantha|karen|moira|fiona/i.test(v.name)) : null) ||
+    voices.find((v) => v.name.toLowerCase().includes("google") && v.lang === bcp47) ||
+    voices.find((v) => v.name.toLowerCase().includes("google") && v.lang.toLowerCase().startsWith(lang2)) ||
+    voices.find((v) => v.lang === bcp47) ||
+    voices.find((v) => v.lang.toLowerCase().startsWith(lang2)) ||
+    (lang2 === "en" ? voices.find((v) => /samantha|karen|moira|fiona|zira|hazel/i.test(v.name)) : null) ||
     voices[0] ||
     null
   );
@@ -125,9 +160,23 @@ export default function Voice() {
     speechSynthesis.cancel();
     clearSynthTimers();
 
-    const langCode = detectedLangRef.current.code;
-    // Map to a valid BCP-47 tag for TTS (Hinglish uses Hindi voice)
-    const lang = langCode === "hinglish" ? "hi-IN" : langCode;
+    // Detect the language of the response text itself (not just user input)
+    // This ensures Hindi Devanagari responses always get a Hindi voice
+    const responseLang = detectResponseLang(text);
+    // If response is English but user was Hinglish, keep Hindi voice for accent
+    const userCode = detectedLangRef.current.code;
+    const lang =
+      responseLang !== "en-US"
+        ? responseLang
+        : userCode === "hinglish"
+        ? "hi-IN"
+        : responseLang;
+
+    // Language-specific speech settings
+    const isHindi = lang === "hi-IN";
+    const speechRate = isHindi ? 0.9 : 0.95;   // slower for Hindi clarity
+    const speechPitch = isHindi ? 1.0 : 1.05;  // neutral pitch for Hindi
+
     const sentences = splitSentences(text);
     if (sentences.length === 0) { onSpeechDone(); return; }
 
@@ -137,6 +186,9 @@ export default function Voice() {
     synthKeepAliveRef.current = setInterval(() => {
       if (speechSynthesis.paused) speechSynthesis.resume();
     }, 5000);
+
+    // Pre-select the voice once for the whole response
+    const selectedVoice = getBestVoice(lang);
 
     let currentIndex = 0;
     let onEndFired = false;
@@ -152,12 +204,11 @@ export default function Voice() {
 
       const utter = new SpeechSynthesisUtterance(sentences[index]);
       utter.lang = lang;
-      utter.rate = 0.95;
-      utter.pitch = 1.05;
+      utter.rate = speechRate;
+      utter.pitch = speechPitch;
       utter.volume = 1;
 
-      const voice = getBestVoice(lang);
-      if (voice) utter.voice = voice;
+      if (selectedVoice) utter.voice = selectedVoice;
 
       // Estimate fallback timeout: ~130 chars/sec + 1.5s buffer
       const estimatedMs = (sentences[index].length / 130) * 1000 + 1500;
