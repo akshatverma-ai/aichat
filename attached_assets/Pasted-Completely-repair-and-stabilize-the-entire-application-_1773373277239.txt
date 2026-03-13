@@ -1,0 +1,89 @@
+Completely repair and stabilize the entire application so it works correctly on both mobile and desktop after deployment.
+
+The current app has the following issues:
+
+* Login works but feature screens do not open.
+* Navigation errors appear when clicking Text, Voice, or Assist.
+* Voice assistant sometimes does not respond.
+* App behaves differently after deployment.
+* Mobile users cannot access the main features.
+
+Your task is to refactor and rebuild the application architecture to make it stable.
+
+1. Routing System
+   Replace BrowserRouter with HashRouter to ensure routing works correctly in deployed environments.
+
+Example:
+import { HashRouter as Router } from "react-router-dom";
+
+Wrap the entire app in Router.
+
+2. Create a clean routing structure:
+
+<Route path="/" element={<Login />} />
+<Route path="/chat" element={<Chat />} />
+<Route path="/voice" element={<Voice />} />
+<Route path="/assist" element={<Assist />} />
+
+3. Fix navigation buttons
+
+Ensure all navigation buttons use:
+
+navigate("/chat")
+navigate("/voice")
+navigate("/assist")
+
+Remove any custom navigation wrapper functions like openFeature() that block routing.
+
+4. Mobile compatibility
+
+Ensure the UI is responsive and works on small screens.
+
+Add:
+
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+Fix layout so it works on phones and laptops.
+
+5. Voice Assistant
+
+Implement voice recognition and voice responses.
+
+Use Web Speech API for speech recognition and SpeechSynthesis for responses.
+
+Ensure:
+
+* microphone permission works
+* speech recognition sends transcript to /api/chat
+* AI reply is spoken automatically.
+
+6. AI Backend
+
+Ensure a working API endpoint exists:
+
+POST /api/chat
+
+Use model:
+
+gpt-4o-mini
+
+Return the AI response properly.
+
+7. Error Handling
+
+Remove the message:
+
+"Navigation Error: Could not open feature"
+
+Ensure clicking any feature always loads the correct screen.
+
+8. Deployment Stability
+
+Ensure the server runs using:
+
+const PORT = process.env.PORT || 3000;
+
+Ensure the app works after publishing.
+
+Final Goal:
+The application must work smoothly on both desktop and mobile with login, chat, voice, and assist features fully functional after deployment.
