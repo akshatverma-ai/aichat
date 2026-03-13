@@ -100,12 +100,16 @@ export default function Voice() {
   const [supported, setSupported] = useState(true);
   const [active, setActive] = useState(false);
   const [detectedLangName, setDetectedLangName] = useState("English");
+  const [langLocked, setLangLocked] = useState(false);
 
   const convIdRef = useRef<number | null>(id ? parseInt(id) : null);
   const phaseRef = useRef<Phase>("idle");
   const activeRef = useRef(false);
   const recognitionRef = useRef<any>(null);
   const detectedLangRef = useRef<LangInfo>({ code: "en-US", name: "English", recLang: "en-US" });
+  // Explicitly requested language (set by voice commands like "speak in Hindi")
+  // null = auto-detect from speech
+  const preferredLangRef = useRef<string | null>(null);
 
   // TTS queue for progressive streaming speech
   const ttsQueueRef = useRef<string[]>([]);
@@ -218,11 +222,68 @@ export default function Voice() {
     }, 5000);
   }
 
+  // Returns the new LangInfo if a switch command was detected, null otherwise
+  function checkLangCommand(text: string): LangInfo | null {
+    const t = text.toLowerCase();
+
+    const hindi = /\b(hindi|हिंदी)\b|hindi (mein|me|mai)|speak.*hindi|switch.*hindi|use.*hindi/i;
+    const english = /\b(english|अंग्रेज़ी)\b|english (mein|me|mai)|speak.*english|switch.*english|use.*english/i;
+    const hinglish = /hinglish|mix.*language|dono.*bhasha/i;
+    const arabic = /\b(arabic|عربي)\b|speak.*arabic/i;
+
+    let switched: LangInfo | null = null;
+
+    if (hindi.test(t)) {
+      switched = { code: "hi-IN", name: "Hindi", recLang: "hi-IN" };
+      preferredLangRef.current = "hi-IN";
+    } else if (english.test(t)) {
+      switched = { code: "en-US", name: "English", recLang: "en-US" };
+      preferredLangRef.current = "en-US";
+    } else if (hinglish.test(t)) {
+      switched = { code: "hinglish", name: "Hinglish", recLang: "hi-IN" };
+      preferredLangRef.current = "hi-IN";
+    } else if (arabic.test(t)) {
+      switched = { code: "ar-SA", name: "Arabic", recLang: "ar-SA" };
+      preferredLangRef.current = "ar-SA";
+    }
+
+    if (switched) {
+      detectedLangRef.current = switched;
+      setDetectedLangName(switched.name);
+      setLangLocked(true);
+    }
+    return switched;
+  }
+
   async function askAI(text: string) {
     const convId = convIdRef.current;
     if (!convId) { go("idle"); return; }
 
-    const lang = detectLanguage(text);
+    // Check for explicit language switch commands first
+    const commandLang = checkLangCommand(text);
+
+    // Auto-detect only if no explicit preference is set and no command was given
+    let lang: LangInfo;
+    if (commandLang) {
+      lang = commandLang;
+    } else if (preferredLangRef.current) {
+      // Respect explicit preference but re-detect to catch script-based languages
+      const detected = detectLanguage(text);
+      // Only override preference if user actually switched scripts (e.g., typed Devanagari)
+      if (detected.code !== "en-US" && detected.code !== "hinglish") {
+        lang = detected;
+        preferredLangRef.current = null; // script detected — reset override
+        setLangLocked(false);
+      } else {
+        // Keep preferred lang but use detected for name display
+        lang = { ...detectedLangRef.current };
+      }
+    } else {
+      lang = detectLanguage(text);
+      // If back to English, clear any Hindi preference so next session isn't locked
+      if (lang.code === "en-US") { preferredLangRef.current = null; setLangLocked(false); }
+    }
+
     detectedLangRef.current = lang;
     setDetectedLangName(lang.name);
 
@@ -344,7 +405,9 @@ export default function Voice() {
     if (phaseRef.current === "listening") return;
 
     const rec = new SR();
-    rec.lang = detectedLangRef.current.recLang || "en-US";
+    // Use explicit preference if set, otherwise use last-detected language,
+    // defaulting to en-US (broad recognition that handles most languages)
+    rec.lang = preferredLangRef.current || detectedLangRef.current.recLang || "en-US";
     rec.continuous = false;
     rec.interimResults = true;
     rec.maxAlternatives = 1;
@@ -491,12 +554,14 @@ export default function Voice() {
     : phase === "speaking" ? "#a78bfa"
     : "#00e5ff";
 
+  const activeLangName = detectedLangName;
+
   const label =
     !ready ? "⌛ INITIALIZING"
     : !supported ? "⚠ NOT SUPPORTED — USE CHROME"
-    : phase === "listening" ? "🎙️ LISTENING"
+    : phase === "listening" ? `🎙️ LISTENING · ${activeLangName}`
     : phase === "thinking"  ? "⚙️  THINKING"
-    : phase === "speaking"  ? "🔊 SPEAKING"
+    : phase === "speaking"  ? `🔊 SPEAKING · ${activeLangName}`
     : "✓  READY — TAP TO TALK";
 
   const barsOn = phase === "listening" || phase === "speaking";
@@ -525,18 +590,18 @@ export default function Voice() {
       <div className="flex-1 flex flex-col items-center justify-between py-6 px-4 relative">
 
         <div className="w-full text-center">
-          <div className="flex items-center justify-center gap-3 mb-5">
+          <div className="flex flex-col items-center gap-1.5 mb-5">
             <motion.p
               animate={{ opacity: [0.55, 1, 0.55] }}
               transition={{ duration: 1.3, repeat: Infinity }}
-              className="text-[11px] font-heading font-bold tracking-[0.3em]"
+              className="text-[11px] font-heading font-bold tracking-[0.3em] text-center"
               style={{ color }}
             >
               {label}
             </motion.p>
-            {phase !== "idle" && detectedLangName !== "English" && (
-              <span className="text-[10px] font-heading px-2 py-0.5 rounded-full border border-white/15 text-white/50">
-                {detectedLangName}
+            {langLocked && (
+              <span className="text-[9px] font-heading px-2 py-0.5 rounded-full border border-white/15 text-white/40">
+                LOCKED · say "speak in English" to auto-detect
               </span>
             )}
           </div>
