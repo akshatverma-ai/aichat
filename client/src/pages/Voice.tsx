@@ -286,6 +286,8 @@ export default function Voice() {
 
     detectedLangRef.current = lang;
     setDetectedLangName(lang.name);
+    // Persist so other pages (e.g. Visual Assist) can pick up the user's language
+    try { localStorage.setItem("aichat_lang", JSON.stringify({ code: lang.code, name: lang.name })); } catch {}
 
     go("thinking");
     clearTts();

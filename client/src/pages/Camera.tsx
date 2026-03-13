@@ -2,7 +2,17 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import Webcam from "react-webcam";
 import { Layout } from "@/components/Layout";
 import { motion, AnimatePresence } from "framer-motion";
-import { ScanFace, Volume2 } from "lucide-react";
+import { ScanFace, Volume2, Globe } from "lucide-react";
+
+interface LangPref { code: string; name: string; }
+
+function getStoredLang(): LangPref {
+  try {
+    const raw = localStorage.getItem("aichat_lang");
+    if (raw) return JSON.parse(raw) as LangPref;
+  } catch {}
+  return { code: "en-US", name: "English" };
+}
 
 export default function CameraView() {
   const [detectedObject, setDetectedObject] = useState<string>("Analyzing...");
@@ -10,9 +20,18 @@ export default function CameraView() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [audioUrl, setAudioUrl] = useState<string>("");
   const [isPlaying, setIsPlaying] = useState(false);
+  const [langPref, setLangPref] = useState<LangPref>(getStoredLang);
+
   const webcamRef = useRef<Webcam>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const captureIntervalRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Re-read language preference on focus (user may have changed it in Voice tab)
+  useEffect(() => {
+    const onFocus = () => setLangPref(getStoredLang());
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
+  }, []);
 
   // Initialize audio element on mount
   useEffect(() => {
@@ -22,7 +41,6 @@ export default function CameraView() {
       audioElement.onended = () => setIsPlaying(false);
       audioRef.current = audioElement;
     }
-
     return () => {
       if (audioRef.current) {
         audioRef.current.pause();
@@ -38,19 +56,24 @@ export default function CameraView() {
     try {
       setIsProcessing(true);
       const imageSrc = webcamRef.current.getScreenshot();
-      
       if (!imageSrc) return;
 
       const base64 = imageSrc.split(",")[1];
+      const currentLang = getStoredLang(); // always read fresh
+      setLangPref(currentLang);
 
       const response = await fetch("/api/vision/detect-stream", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ image: base64 }),
+        body: JSON.stringify({
+          image: base64,
+          lang: currentLang.code,
+          langName: currentLang.name,
+        }),
       });
 
       if (!response.body) return;
-      
+
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       let buffer = "";
@@ -65,10 +88,8 @@ export default function CameraView() {
 
         for (const line of lines) {
           if (!line.startsWith("data: ")) continue;
-          
           try {
             const data = JSON.parse(line.slice(6));
-            
             if (data.type === "objectName") {
               setDetectedObject(data.data);
             } else if (data.type === "explanation") {
@@ -93,33 +114,19 @@ export default function CameraView() {
   // Start real-time analysis loop
   useEffect(() => {
     if (!webcamRef.current) return;
-    
     captureIntervalRef.current = setInterval(() => {
-      try {
-        captureAndAnalyze();
-      } catch (error) {
-        console.error("Capture interval error:", error);
-      }
+      try { captureAndAnalyze(); } catch (error) { console.error("Capture interval error:", error); }
     }, 4000);
-
-    return () => {
-      if (captureIntervalRef.current) clearInterval(captureIntervalRef.current);
-    };
+    return () => { if (captureIntervalRef.current) clearInterval(captureIntervalRef.current); };
   }, [captureAndAnalyze]);
 
   const playAudio = async () => {
-    if (!audioRef.current || !audioUrl) {
-      console.warn("Audio element or URL not available");
-      return;
-    }
-
+    if (!audioRef.current || !audioUrl) return;
     try {
       audioRef.current.src = audioUrl;
       audioRef.current.load();
-      
       setIsPlaying(true);
       const playPromise = audioRef.current.play();
-
       if (playPromise !== undefined) {
         await playPromise.catch((err) => {
           console.error("Playback failed:", err);
@@ -131,6 +138,8 @@ export default function CameraView() {
       setIsPlaying(false);
     }
   };
+
+  const isHindi = langPref.code.startsWith("hi") || langPref.name.toLowerCase().includes("hindi");
 
   return (
     <Layout title="Aichat - Visual Assist" showBack noPadding>
@@ -148,9 +157,9 @@ export default function CameraView() {
               <div className="w-8 h-8 border-t-4 border-l-4 border-primary" />
               <div className="w-8 h-8 border-t-4 border-r-4 border-primary" />
             </div>
-            
+
             {isProcessing && (
-              <motion.div 
+              <motion.div
                 animate={{ y: ["0%", "400%", "0%"] }}
                 transition={{ duration: 2, repeat: Infinity, ease: "linear" }}
                 className="w-full h-1 bg-primary/50 shadow-[0_0_15px_rgba(0,229,255,0.8)]"
@@ -165,10 +174,19 @@ export default function CameraView() {
         </div>
 
         <div className="relative z-10 flex-1 flex flex-col p-6 pointer-events-none pt-24">
+          {/* Object name badge */}
           <div className="glass-panel self-start px-4 py-2 rounded-lg flex items-center gap-2 mb-auto">
             <ScanFace className="w-4 h-4 text-primary" />
             <span className="text-xs font-heading font-bold text-primary tracking-widest uppercase">
               OBJECT: {detectedObject}
+            </span>
+          </div>
+
+          {/* Language indicator */}
+          <div className="glass-panel self-end px-3 py-1.5 rounded-lg flex items-center gap-1.5 mb-2 pointer-events-none">
+            <Globe className="w-3 h-3 text-primary/70" />
+            <span className="text-xs font-heading font-bold text-primary/70 uppercase tracking-wider">
+              {isHindi ? "हिंदी" : langPref.name}
             </span>
           </div>
 
@@ -185,11 +203,12 @@ export default function CameraView() {
                   <p className="text-white/80 text-xs mt-2 leading-relaxed">{explanation}</p>
                   {audioUrl && (
                     <button
+                      data-testid="button-play-audio"
                       onClick={playAudio}
                       className="mt-3 text-xs bg-primary text-black px-4 py-1.5 rounded hover:bg-cyan-400 transition-colors flex items-center gap-2 font-bold pointer-events-auto"
                     >
                       <Volume2 className="w-3 h-3" />
-                      {isPlaying ? "PLAYING..." : "PLAY AUDIO"}
+                      {isPlaying ? (isHindi ? "चल रहा है..." : "PLAYING...") : (isHindi ? "सुनें" : "PLAY AUDIO")}
                     </button>
                   )}
                 </div>

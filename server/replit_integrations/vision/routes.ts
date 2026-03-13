@@ -5,13 +5,13 @@ export function registerVisionRoutes(app: Express): void {
   // Detect object from image
   app.post("/api/vision/detect", async (req: Request, res: Response) => {
     try {
-      const { image } = req.body;
+      const { image, lang, langName } = req.body;
       
       if (!image) {
         return res.status(400).json({ error: "Image data required" });
       }
 
-      const result = await detectAndExplainObject(image);
+      const result = await detectAndExplainObject(image, lang, langName);
       
       res.json({
         objectName: result.objectName,
@@ -27,7 +27,7 @@ export function registerVisionRoutes(app: Express): void {
   // Stream detection (real-time)
   app.post("/api/vision/detect-stream", async (req: Request, res: Response) => {
     try {
-      const { image } = req.body;
+      const { image, lang, langName } = req.body;
       
       if (!image) {
         return res.status(400).json({ error: "Image data required" });
@@ -36,8 +36,9 @@ export function registerVisionRoutes(app: Express): void {
       res.setHeader("Content-Type", "text/event-stream");
       res.setHeader("Cache-Control", "no-cache");
       res.setHeader("Connection", "keep-alive");
+      res.flushHeaders();
 
-      const stream = await streamObjectDetection(image);
+      const stream = await streamObjectDetection(image, lang, langName);
       
       for await (const chunk of stream) {
         if (chunk.type === "audio") {
