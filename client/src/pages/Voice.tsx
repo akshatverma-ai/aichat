@@ -260,32 +260,27 @@ export default function Voice() {
     return switched;
   }
 
-  async function askAI(text: string) {
+  async function askAI(text: string, attempt = 0) {
     const convId = convIdRef.current;
     if (!convId) { go("idle"); return; }
 
     // Check for explicit language switch commands first
     const commandLang = checkLangCommand(text);
 
-    // Auto-detect only if no explicit preference is set and no command was given
     let lang: LangInfo;
     if (commandLang) {
       lang = commandLang;
     } else if (preferredLangRef.current) {
-      // Respect explicit preference but re-detect to catch script-based languages
       const detected = detectLanguage(text);
-      // Only override preference if user actually switched scripts (e.g., typed Devanagari)
       if (detected.code !== "en-US" && detected.code !== "hinglish") {
         lang = detected;
-        preferredLangRef.current = null; // script detected — reset override
+        preferredLangRef.current = null;
         setLangLocked(false);
       } else {
-        // Keep preferred lang but use detected for name display
         lang = { ...detectedLangRef.current };
       }
     } else {
       lang = detectLanguage(text);
-      // If back to English, clear any Hindi preference so next session isn't locked
       if (lang.code === "en-US") { preferredLangRef.current = null; setLangLocked(false); }
     }
 
@@ -294,6 +289,8 @@ export default function Voice() {
 
     go("thinking");
     clearTts();
+
+    const MAX_RETRIES = 2;
 
     try {
       const res = await fetch(`/api/conversations/${convId}/messages`, {
@@ -308,7 +305,17 @@ export default function Voice() {
         credentials: "include",
       });
 
-      if (!res.ok || !res.body) throw new Error("Bad response");
+      // Retry on server errors (5xx) but not client errors (4xx)
+      if (!res.ok) {
+        const status = res.status;
+        if (status >= 500 && attempt < MAX_RETRIES) {
+          await new Promise((r) => setTimeout(r, 600 * (attempt + 1)));
+          return askAI(text, attempt + 1);
+        }
+        throw new Error(`Server error ${status}`);
+      }
+
+      if (!res.body) throw new Error("No response body");
 
       const reader = res.body.getReader();
       const dec = new TextDecoder();
@@ -316,11 +323,11 @@ export default function Voice() {
       let pending = "";
       let buf = "";
       let speakingStarted = false;
+      let streamErrored = false;
 
       const initSpeaking = (textSoFar: string) => {
         if (speakingStarted) return;
         speakingStarted = true;
-        // Pick TTS lang from response content
         const rLang = detectResponseLang(textSoFar);
         ttsLangRef.current =
           rLang !== "en-US" ? rLang :
@@ -344,6 +351,13 @@ export default function Voice() {
           if (!line.startsWith("data: ")) continue;
           try {
             const d = JSON.parse(line.slice(6));
+
+            // Handle server-sent error event
+            if (d.error && !d.done) {
+              console.warn("Stream error from server:", d.error);
+              streamErrored = true;
+              break;
+            }
             if (d.done) continue;
             if (!d.content) continue;
 
@@ -351,7 +365,7 @@ export default function Voice() {
             pending += d.content;
             setAiText(fullText);
 
-            // Extract and speak complete sentences immediately
+            // Speak complete sentences as they arrive
             let lastIdx = 0;
             sentenceRe.lastIndex = 0;
             let match: RegExpExecArray | null;
@@ -366,9 +380,17 @@ export default function Voice() {
             pending = pending.slice(lastIdx);
           } catch {}
         }
+        if (streamErrored) break;
       }
 
-      // Speak any remaining text after stream ends
+      // Retry if server returned an error mid-stream and nothing was spoken
+      if (streamErrored && !fullText && attempt < MAX_RETRIES) {
+        clearTts();
+        await new Promise((r) => setTimeout(r, 600 * (attempt + 1)));
+        return askAI(text, attempt + 1);
+      }
+
+      // Speak any remaining text
       if (pending.trim()) {
         initSpeaking(fullText);
         enqueueSentence(pending);
@@ -376,24 +398,33 @@ export default function Voice() {
 
       streamDoneRef.current = true;
 
-      // If nothing was spoken yet (e.g., very short reply)
       if (!speakingStarted) {
         if (fullText.trim()) {
           initSpeaking(fullText);
           enqueueSentence(fullText);
         } else {
-          go("idle");
+          // Empty response — restart listening
+          if (activeRef.current) setTimeout(() => listen(), 200);
+          else go("idle");
           return;
         }
       }
 
-      // If queue already drained before stream marked done, finish now
       if (!ttsBusyRef.current && ttsQueueRef.current.length === 0) {
         onSpeechDone();
       }
 
-    } catch (err) {
-      console.error("AI error:", err);
+    } catch (err: any) {
+      const msg = err?.message || String(err);
+      console.error("AI error:", msg);
+
+      // Retry on network failures
+      if ((msg.includes("fetch") || msg.includes("network") || msg.includes("Failed")) && attempt < MAX_RETRIES) {
+        clearTts();
+        await new Promise((r) => setTimeout(r, 800 * (attempt + 1)));
+        return askAI(text, attempt + 1);
+      }
+
       clearTts();
       const fallback = "Sorry, something went wrong. Please try again.";
       setAiText(fallback);
