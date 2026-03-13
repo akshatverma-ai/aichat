@@ -11,29 +11,54 @@ type Phase = "idle" | "listening" | "thinking" | "speaking";
 interface LangInfo {
   code: string;
   name: string;
+  recLang: string; // lang for SpeechRecognition
 }
 
+// Common Hindi / Urdu words written in Latin script (Hinglish)
+const HINGLISH_WORDS = new Set([
+  "kya","hai","nahi","nahin","haan","acha","theek","bhai","yaar","main","mein",
+  "tum","aap","woh","koi","kuch","bahut","bilkul","abhi","phir","toh","aur",
+  "magar","lekin","matlab","samajh","bolo","batao","karo","kar","hoga","hua",
+  "raha","rahi","chalte","chal","suno","dekho","laga","lagta","lagti","hoti",
+  "hota","teri","meri","iska","uska","apna","apni","achha","thoda","zyada",
+  "pata","neta","dost","paisa","kaam","ghar","sab","kaisa","kaisi","kaun",
+]);
+
 function detectLanguage(text: string): LangInfo {
-  if (/[\u0900-\u097F]/.test(text)) return { code: "hi-IN", name: "Hindi" };
-  if (/[\u0600-\u06FF]/.test(text)) return { code: "ar-SA", name: "Arabic" };
-  if (/[\u4E00-\u9FFF]/.test(text)) return { code: "zh-CN", name: "Chinese" };
-  if (/[\u3040-\u30FF]/.test(text)) return { code: "ja-JP", name: "Japanese" };
-  if (/[\uAC00-\uD7AF]/.test(text)) return { code: "ko-KR", name: "Korean" };
-  if (/[\u0A00-\u0A7F]/.test(text)) return { code: "pa-IN", name: "Punjabi" };
-  if (/[\u0B80-\u0BFF]/.test(text)) return { code: "ta-IN", name: "Tamil" };
-  if (/[\u0C00-\u0C7F]/.test(text)) return { code: "te-IN", name: "Telugu" };
-  if (/[\u0D00-\u0D7F]/.test(text)) return { code: "ml-IN", name: "Malayalam" };
-  if (/[\u0980-\u09FF]/.test(text)) return { code: "bn-IN", name: "Bengali" };
-  return { code: "en-US", name: "English" };
+  // Script-based detection (definitive)
+  if (/[\u0900-\u097F]/.test(text)) return { code: "hi-IN", name: "Hindi", recLang: "hi-IN" };
+  if (/[\u0600-\u06FF]/.test(text)) return { code: "ar-SA", name: "Arabic", recLang: "ar-SA" };
+  if (/[\u4E00-\u9FFF]/.test(text)) return { code: "zh-CN", name: "Chinese", recLang: "zh-CN" };
+  if (/[\u3040-\u30FF]/.test(text)) return { code: "ja-JP", name: "Japanese", recLang: "ja-JP" };
+  if (/[\uAC00-\uD7AF]/.test(text)) return { code: "ko-KR", name: "Korean", recLang: "ko-KR" };
+  if (/[\u0A00-\u0A7F]/.test(text)) return { code: "pa-IN", name: "Punjabi", recLang: "pa-IN" };
+  if (/[\u0B80-\u0BFF]/.test(text)) return { code: "ta-IN", name: "Tamil", recLang: "ta-IN" };
+  if (/[\u0C00-\u0C7F]/.test(text)) return { code: "te-IN", name: "Telugu", recLang: "te-IN" };
+  if (/[\u0D00-\u0D7F]/.test(text)) return { code: "ml-IN", name: "Malayalam", recLang: "ml-IN" };
+  if (/[\u0980-\u09FF]/.test(text)) return { code: "bn-IN", name: "Bengali", recLang: "bn-IN" };
+
+  // Hinglish detection: count Latin-script Hindi/Urdu words
+  const words = text.toLowerCase().match(/\b[a-z]+\b/g) || [];
+  if (words.length > 0) {
+    const hindiCount = words.filter((w) => HINGLISH_WORDS.has(w)).length;
+    const ratio = hindiCount / words.length;
+    if (hindiCount >= 2 || ratio >= 0.3) {
+      return { code: "hinglish", name: "Hinglish", recLang: "hi-IN" };
+    }
+  }
+
+  return { code: "en-US", name: "English", recLang: "en-US" };
 }
 
 function getBestVoice(langCode: string): SpeechSynthesisVoice | null {
   const voices = speechSynthesis.getVoices();
-  const lang2 = langCode.slice(0, 2);
+  // Hinglish: prefer a Hindi voice so pronunciation sounds natural
+  const effectiveLang = langCode === "hinglish" ? "hi-IN" : langCode;
+  const lang2 = effectiveLang.slice(0, 2);
   return (
-    voices.find((v) => v.name.toLowerCase().includes("google") && v.lang === langCode) ||
+    voices.find((v) => v.name.toLowerCase().includes("google") && v.lang === effectiveLang) ||
     voices.find((v) => v.name.toLowerCase().includes("google") && v.lang.startsWith(lang2)) ||
-    voices.find((v) => v.lang === langCode) ||
+    voices.find((v) => v.lang === effectiveLang) ||
     voices.find((v) => v.lang.startsWith(lang2)) ||
     (lang2 === "en" ? voices.find((v) => /female|zira|hazel|samantha|karen|moira|fiona/i.test(v.name)) : null) ||
     voices[0] ||
@@ -63,7 +88,7 @@ export default function Voice() {
   const phaseRef = useRef<Phase>("idle");
   const activeRef = useRef(false);
   const recognitionRef = useRef<any>(null);
-  const detectedLangRef = useRef<LangInfo>({ code: "en-US", name: "English" });
+  const detectedLangRef = useRef<LangInfo>({ code: "en-US", name: "English", recLang: "en-US" });
   // Chrome SpeechSynthesis keepalive interval
   const synthKeepAliveRef = useRef<ReturnType<typeof setInterval> | null>(null);
   // Watchdog to detect when onend doesn't fire
@@ -100,7 +125,9 @@ export default function Voice() {
     speechSynthesis.cancel();
     clearSynthTimers();
 
-    const lang = detectedLangRef.current.code;
+    const langCode = detectedLangRef.current.code;
+    // Map to a valid BCP-47 tag for TTS (Hinglish uses Hindi voice)
+    const lang = langCode === "hinglish" ? "hi-IN" : langCode;
     const sentences = splitSentences(text);
     if (sentences.length === 0) { onSpeechDone(); return; }
 
@@ -185,7 +212,7 @@ export default function Voice() {
       const res = await fetch(`/api/conversations/${convId}/messages`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ content: text }),
+        body: JSON.stringify({ content: text, lang: lang.code }),
         credentials: "include",
       });
 
@@ -236,7 +263,7 @@ export default function Voice() {
     if (phaseRef.current === "listening") return;
 
     const rec = new SR();
-    rec.lang = detectedLangRef.current.code || "en-US";
+    rec.lang = detectedLangRef.current.recLang || "en-US";
     rec.continuous = false;
     rec.interimResults = true;
     rec.maxAlternatives = 1;
