@@ -299,7 +299,12 @@ export default function Voice() {
       const res = await fetch(`/api/conversations/${convId}/messages`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ content: text, lang: lang.code }),
+        body: JSON.stringify({
+          content: text,
+          voiceMode: true,
+          detectedLang: lang.code,
+          detectedLangName: lang.name,
+        }),
         credentials: "include",
       });
 

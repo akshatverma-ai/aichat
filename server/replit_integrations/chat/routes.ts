@@ -88,19 +88,31 @@ export function registerChatRoutes(app: Express): void {
 
       // For voice mode, prepend a multilingual system prompt for concise spoken responses
       if (voiceMode) {
-        const langHint = detectedLangName && detectedLang
-          ? `The user is speaking ${detectedLangName} (${detectedLang}). You MUST reply in ${detectedLangName}. `
+        const langHint = detectedLangName && detectedLang && detectedLang !== "en-US"
+          ? `The user is speaking in ${detectedLangName}. You MUST reply ONLY in ${detectedLangName} — do not switch to English. `
           : "";
         chatMessages.unshift({
           role: "system",
           content:
-            `You are Aichat, a friendly voice assistant. ` +
+            `You are Aichat, a smart and friendly voice assistant. You listen carefully and always give clear, helpful answers. ` +
             `${langHint}` +
-            `Always reply in the exact same language the user uses — if they speak Hindi, reply in Hindi; ` +
-            `if English, reply in English; if Hinglish (mixed Hindi-English), reply in Hinglish. ` +
-            `Keep responses concise and conversational — ideally 1–3 sentences. ` +
-            `Avoid lists, bullet points, markdown, or lengthy explanations. ` +
-            `Speak naturally and warmly as if talking to a person face-to-face.`,
+            `LANGUAGE RULE (most important): Always reply in the exact same language the user is speaking. ` +
+            `If they speak Hindi → reply fully in Hindi. ` +
+            `If they speak English → reply in English. ` +
+            `If they speak Hinglish (mixed Hindi and English) → reply naturally in Hinglish. ` +
+            `Never translate the user's message into a different language unprompted. ` +
+            `\nSTYLE RULE: Keep responses short, warm, and conversational — 1 to 3 sentences at most. ` +
+            `Answer the question directly and clearly. No bullet points, no markdown, no long explanations. ` +
+            `Speak as if you are a knowledgeable friend talking face-to-face. ` +
+            `If the user asks something complex, give the key point first, then briefly explain.`,
+        });
+      } else {
+        chatMessages.unshift({
+          role: "system",
+          content:
+            `You are Aichat, a smart and helpful AI assistant. ` +
+            `Always reply in the same language the user writes in. ` +
+            `Be clear, accurate, and helpful. Format your responses neatly when appropriate.`,
         });
       }
 
@@ -114,7 +126,7 @@ export function registerChatRoutes(app: Express): void {
         model: "gpt-4o-mini",
         messages: chatMessages,
         stream: true,
-        max_completion_tokens: voiceMode ? 150 : 2048,
+        max_completion_tokens: voiceMode ? 220 : 2048,
       });
 
       let fullResponse = "";
