@@ -121,6 +121,11 @@ export default function Voice() {
   const synthKeepAliveRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const synthWatchdogRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // Silence detection timer for continuous mode
+  const silenceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Accumulated final transcript across continuous results
+  const finalAccumRef = useRef("");
+
   const avatarUrl = user ? AVATARS[user.avatar as keyof typeof AVATARS] : AVATARS.avatar1;
 
   function go(p: Phase) {
@@ -395,6 +400,13 @@ export default function Voice() {
     }
   }
 
+  function clearSilenceTimer() {
+    if (silenceTimerRef.current) {
+      clearTimeout(silenceTimerRef.current);
+      silenceTimerRef.current = null;
+    }
+  }
+
   function listen() {
     const SR =
       (window as any).SpeechRecognition ||
@@ -405,57 +417,86 @@ export default function Voice() {
     if (phaseRef.current === "listening") return;
 
     const rec = new SR();
-    // Use explicit preference if set, otherwise use last-detected language,
-    // defaulting to en-US (broad recognition that handles most languages)
     rec.lang = preferredLangRef.current || detectedLangRef.current.recLang || "en-US";
-    rec.continuous = false;
+    rec.continuous = true;
     rec.interimResults = true;
     rec.maxAlternatives = 1;
     recognitionRef.current = rec;
 
-    let final = "";
+    // Reset accumulator for this session
+    finalAccumRef.current = "";
+
+    // After this much silence, stop and submit
+    const SILENCE_MS = 1400;
+
+    const stopAndSubmit = () => {
+      clearSilenceTimer();
+      try { rec.stop(); } catch {}
+      // onend will handle submission
+    };
 
     rec.onstart = () => {
       go("listening");
       setInterimText("");
-      final = "";
+      finalAccumRef.current = "";
     };
 
     rec.onresult = (e: any) => {
+      // Reset silence countdown on every new result
+      clearSilenceTimer();
+
       let interim = "";
       for (let i = e.resultIndex; i < e.results.length; i++) {
         if (e.results[i].isFinal) {
-          final += e.results[i][0].transcript;
+          finalAccumRef.current += e.results[i][0].transcript + " ";
         } else {
           interim += e.results[i][0].transcript;
         }
       }
+
+      // Show real-time: interim text or the accumulated final so far
       setInterimText(interim);
-      if (final) setUserText(final);
+      const accumulated = finalAccumRef.current.trim();
+      if (accumulated) setUserText(accumulated);
+
+      // Restart silence timer — submit after user pauses
+      silenceTimerRef.current = setTimeout(stopAndSubmit, SILENCE_MS);
     };
 
     rec.onend = () => {
+      clearSilenceTimer();
       setInterimText("");
-      const text = final.trim();
+      const text = finalAccumRef.current.trim();
+      finalAccumRef.current = "";
       if (text) {
         askAI(text);
       } else if (activeRef.current) {
-        setTimeout(() => listen(), 100); // reduced from 300ms
+        // No speech detected — restart immediately to keep listening
+        setTimeout(() => listen(), 120);
       } else {
         go("idle");
       }
     };
 
     rec.onerror = (e: any) => {
-      const recoverable = e.error === "no-speech" || e.error === "aborted";
-      if (recoverable && activeRef.current && phaseRef.current === "listening") {
-        setTimeout(() => listen(), 100); // reduced from 300ms
+      clearSilenceTimer();
+      if (e.error === "no-speech") {
+        // Browser timed out waiting for speech — restart immediately
+        if (activeRef.current && phaseRef.current === "listening") {
+          setTimeout(() => listen(), 100);
+        }
+      } else if (e.error === "aborted") {
+        // We called abort/stop — onend handles the rest
       } else if (e.error === "not-allowed" || e.error === "service-not-allowed") {
         setSupported(false);
         go("idle");
       } else {
         console.error("Recognition error:", e.error);
-        go("idle");
+        if (activeRef.current && phaseRef.current === "listening") {
+          setTimeout(() => listen(), 300);
+        } else {
+          go("idle");
+        }
       }
     };
 
@@ -463,13 +504,17 @@ export default function Voice() {
       rec.start();
     } catch (err) {
       console.error("Recognition start failed:", err);
-      go("idle");
+      // Race condition — give it a moment then retry
+      if (activeRef.current) setTimeout(() => listen(), 250);
+      else go("idle");
     }
   }
 
   function stopAll() {
     activeRef.current = false;
     setActive(false);
+    clearSilenceTimer();
+    finalAccumRef.current = "";
     clearTts();
     if (recognitionRef.current) {
       try { recognitionRef.current.abort(); } catch {}
@@ -543,6 +588,8 @@ export default function Voice() {
 
     return () => {
       activeRef.current = false;
+      clearSilenceTimer();
+      finalAccumRef.current = "";
       clearTts();
       if (recognitionRef.current) { try { recognitionRef.current.abort(); } catch {} }
     };
@@ -568,7 +615,9 @@ export default function Voice() {
 
   const panelText =
     phase === "listening"
-      ? (interimText || userText || "Listening... speak now")
+      ? (userText
+          ? `${userText}${interimText ? ` ${interimText}` : ''}`
+          : interimText || "Listening… speak now")
       : phase === "thinking"
       ? `"${userText}"`
       : phase === "speaking"
@@ -661,7 +710,7 @@ export default function Voice() {
                 className={`text-sm leading-relaxed ${
                   phase === "speaking"
                     ? "text-accent font-medium"
-                    : phase === "listening" && interimText
+                    : phase === "listening" && !userText && interimText
                     ? "text-white/55 italic"
                     : "text-white/80"
                 }`}
