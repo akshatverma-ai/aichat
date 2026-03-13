@@ -11,10 +11,9 @@ type Phase = "idle" | "listening" | "thinking" | "speaking";
 interface LangInfo {
   code: string;
   name: string;
-  recLang: string; // lang for SpeechRecognition
+  recLang: string;
 }
 
-// Common Hindi / Urdu words written in Latin script (Hinglish)
 const HINGLISH_WORDS = new Set([
   "kya","hai","nahi","nahin","haan","acha","theek","bhai","yaar","main","mein",
   "tum","aap","woh","koi","kuch","bahut","bilkul","abhi","phir","toh","aur",
@@ -25,7 +24,6 @@ const HINGLISH_WORDS = new Set([
 ]);
 
 function detectLanguage(text: string): LangInfo {
-  // Script-based detection (definitive)
   if (/[\u0900-\u097F]/.test(text)) return { code: "hi-IN", name: "Hindi", recLang: "hi-IN" };
   if (/[\u0600-\u06FF]/.test(text)) return { code: "ar-SA", name: "Arabic", recLang: "ar-SA" };
   if (/[\u4E00-\u9FFF]/.test(text)) return { code: "zh-CN", name: "Chinese", recLang: "zh-CN" };
@@ -37,12 +35,10 @@ function detectLanguage(text: string): LangInfo {
   if (/[\u0D00-\u0D7F]/.test(text)) return { code: "ml-IN", name: "Malayalam", recLang: "ml-IN" };
   if (/[\u0980-\u09FF]/.test(text)) return { code: "bn-IN", name: "Bengali", recLang: "bn-IN" };
 
-  // Hinglish detection: count Latin-script Hindi/Urdu words
   const words = text.toLowerCase().match(/\b[a-z]+\b/g) || [];
   if (words.length > 0) {
     const hindiCount = words.filter((w) => HINGLISH_WORDS.has(w)).length;
-    const ratio = hindiCount / words.length;
-    if (hindiCount >= 2 || ratio >= 0.3) {
+    if (hindiCount >= 2 || hindiCount / words.length >= 0.3) {
       return { code: "hinglish", name: "Hinglish", recLang: "hi-IN" };
     }
   }
@@ -50,7 +46,6 @@ function detectLanguage(text: string): LangInfo {
   return { code: "en-US", name: "English", recLang: "en-US" };
 }
 
-/** Detect the script/language of a given text string (for AI response). */
 function detectResponseLang(text: string): string {
   if (/[\u0900-\u097F]/.test(text)) return "hi-IN";
   if (/[\u0600-\u06FF]/.test(text)) return "ar-SA";
@@ -65,26 +60,18 @@ function detectResponseLang(text: string): string {
   return "en-US";
 }
 
-/** Get the best available TTS voice for a BCP-47 language tag. */
 function getBestVoice(bcp47: string): SpeechSynthesisVoice | null {
   const voices = speechSynthesis.getVoices();
   if (!voices.length) return null;
 
   const lang2 = bcp47.slice(0, 2).toLowerCase();
-  const isHindi = bcp47 === "hi-IN";
 
-  if (isHindi) {
-    // Priority chain specifically for Hindi clarity
+  if (bcp47 === "hi-IN") {
     return (
-      // 1. Google's dedicated Hindi voice (best quality)
       voices.find((v) => v.lang === "hi-IN" && v.name.toLowerCase().includes("google")) ||
-      // 2. Any native hi-IN voice
       voices.find((v) => v.lang === "hi-IN") ||
-      // 3. Any voice whose lang starts with "hi"
       voices.find((v) => v.lang.toLowerCase().startsWith("hi")) ||
-      // 4. Microsoft Hindi voice (Windows)
       voices.find((v) => /hindi|hemant|kalpana/i.test(v.name)) ||
-      // 5. Absolute fallback: first available voice
       voices[0] ||
       null
     );
@@ -99,11 +86,6 @@ function getBestVoice(bcp47: string): SpeechSynthesisVoice | null {
     voices[0] ||
     null
   );
-}
-
-function splitSentences(text: string): string[] {
-  const raw = text.match(/[^.!?]+[.!?]+|[^.!?]+$/g) || [text];
-  return raw.map((s) => s.trim()).filter(Boolean);
 }
 
 export default function Voice() {
@@ -124,9 +106,15 @@ export default function Voice() {
   const activeRef = useRef(false);
   const recognitionRef = useRef<any>(null);
   const detectedLangRef = useRef<LangInfo>({ code: "en-US", name: "English", recLang: "en-US" });
-  // Chrome SpeechSynthesis keepalive interval
+
+  // TTS queue for progressive streaming speech
+  const ttsQueueRef = useRef<string[]>([]);
+  const ttsBusyRef = useRef(false);
+  const streamDoneRef = useRef(false);
+  const ttsLangRef = useRef("en-US");
+
+  // Chrome keepalive & watchdog timers
   const synthKeepAliveRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  // Watchdog to detect when onend doesn't fire
   const synthWatchdogRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const avatarUrl = user ? AVATARS[user.avatar as keyof typeof AVATARS] : AVATARS.avatar1;
@@ -137,116 +125,97 @@ export default function Voice() {
   }
 
   function clearSynthTimers() {
-    if (synthKeepAliveRef.current) {
-      clearInterval(synthKeepAliveRef.current);
-      synthKeepAliveRef.current = null;
-    }
-    if (synthWatchdogRef.current) {
-      clearTimeout(synthWatchdogRef.current);
-      synthWatchdogRef.current = null;
-    }
+    if (synthKeepAliveRef.current) { clearInterval(synthKeepAliveRef.current); synthKeepAliveRef.current = null; }
+    if (synthWatchdogRef.current) { clearTimeout(synthWatchdogRef.current); synthWatchdogRef.current = null; }
+  }
+
+  function clearTts() {
+    speechSynthesis.cancel();
+    clearSynthTimers();
+    ttsQueueRef.current = [];
+    ttsBusyRef.current = false;
+    streamDoneRef.current = false;
   }
 
   function onSpeechDone() {
     clearSynthTimers();
     if (activeRef.current) {
-      setTimeout(() => listen(), 450);
+      setTimeout(() => listen(), 150); // reduced from 450ms
     } else {
       go("idle");
     }
   }
 
-  function speak(text: string) {
-    speechSynthesis.cancel();
-    clearSynthTimers();
-
-    // Detect the language of the response text itself (not just user input)
-    // This ensures Hindi Devanagari responses always get a Hindi voice
-    const responseLang = detectResponseLang(text);
-    // If response is English but user was Hinglish, keep Hindi voice for accent
-    const userCode = detectedLangRef.current.code;
-    const lang =
-      responseLang !== "en-US"
-        ? responseLang
-        : userCode === "hinglish"
-        ? "hi-IN"
-        : responseLang;
-
-    // Language-specific speech settings
+  // Speak one sentence and call drainQueue when done
+  function speakOneSentence(text: string) {
+    const lang = ttsLangRef.current;
     const isHindi = lang === "hi-IN";
-    const speechRate = isHindi ? 0.9 : 0.95;   // slower for Hindi clarity
-    const speechPitch = isHindi ? 1.0 : 1.05;  // neutral pitch for Hindi
+    const selectedVoice = getBestVoice(lang);
 
-    const sentences = splitSentences(text);
-    if (sentences.length === 0) { onSpeechDone(); return; }
+    const utter = new SpeechSynthesisUtterance(text);
+    utter.lang = lang;
+    utter.rate = isHindi ? 0.9 : 0.95;
+    utter.pitch = isHindi ? 1.0 : 1.05;
+    utter.volume = 1;
+    if (selectedVoice) utter.voice = selectedVoice;
 
-    go("speaking");
+    let fired = false;
+    const estimatedMs = (text.length / 130) * 1000 + 2000;
 
-    // Chrome fix: resume synthesis every 5s to prevent auto-pause bug
+    if (synthWatchdogRef.current) clearTimeout(synthWatchdogRef.current);
+    synthWatchdogRef.current = setTimeout(() => {
+      if (!fired) { fired = true; drainQueue(); }
+    }, estimatedMs);
+
+    utter.onend = () => {
+      if (!fired) {
+        fired = true;
+        clearSynthTimers();
+        setTimeout(() => drainQueue(), 60);
+      }
+    };
+
+    utter.onerror = (e) => {
+      if (!fired && e.error !== "interrupted") {
+        fired = true;
+        clearSynthTimers();
+        drainQueue();
+      }
+    };
+
+    speechSynthesis.speak(utter);
+  }
+
+  // Pull next sentence from queue or signal completion
+  function drainQueue() {
+    if (ttsQueueRef.current.length === 0) {
+      ttsBusyRef.current = false;
+      if (streamDoneRef.current) {
+        onSpeechDone();
+      }
+      return;
+    }
+    const sentence = ttsQueueRef.current.shift()!;
+    ttsBusyRef.current = true;
+    speakOneSentence(sentence);
+  }
+
+  // Add sentence to queue; start draining immediately if idle
+  function enqueueSentence(sentence: string) {
+    const s = sentence.trim();
+    if (!s) return;
+    ttsQueueRef.current.push(s);
+    if (!ttsBusyRef.current) {
+      drainQueue();
+    }
+  }
+
+  // Start keepalive for Chrome's TTS auto-pause bug
+  function startKeepAlive() {
+    if (synthKeepAliveRef.current) clearInterval(synthKeepAliveRef.current);
     synthKeepAliveRef.current = setInterval(() => {
       if (speechSynthesis.paused) speechSynthesis.resume();
     }, 5000);
-
-    // Pre-select the voice once for the whole response
-    const selectedVoice = getBestVoice(lang);
-
-    let currentIndex = 0;
-    let onEndFired = false;
-
-    const speakNext = (index: number) => {
-      if (index >= sentences.length) {
-        onSpeechDone();
-        return;
-      }
-
-      currentIndex = index;
-      onEndFired = false;
-
-      const utter = new SpeechSynthesisUtterance(sentences[index]);
-      utter.lang = lang;
-      utter.rate = speechRate;
-      utter.pitch = speechPitch;
-      utter.volume = 1;
-
-      if (selectedVoice) utter.voice = selectedVoice;
-
-      // Estimate fallback timeout: ~130 chars/sec + 1.5s buffer
-      const estimatedMs = (sentences[index].length / 130) * 1000 + 1500;
-
-      utter.onstart = () => {
-        // Set a watchdog in case onend doesn't fire (Chrome bug)
-        if (synthWatchdogRef.current) clearTimeout(synthWatchdogRef.current);
-        synthWatchdogRef.current = setTimeout(() => {
-          if (!onEndFired) {
-            speakNext(currentIndex + 1);
-          }
-        }, estimatedMs);
-      };
-
-      utter.onend = () => {
-        onEndFired = true;
-        if (synthWatchdogRef.current) {
-          clearTimeout(synthWatchdogRef.current);
-          synthWatchdogRef.current = null;
-        }
-        setTimeout(() => speakNext(index + 1), 80);
-      };
-
-      utter.onerror = (e) => {
-        onEndFired = true;
-        if (synthWatchdogRef.current) {
-          clearTimeout(synthWatchdogRef.current);
-          synthWatchdogRef.current = null;
-        }
-        if (e.error !== "interrupted") {
-          speakNext(index + 1);
-        }
-      };
-
-      speechSynthesis.speak(utter);
-    };
-
-    speakNext(0);
   }
 
   async function askAI(text: string) {
@@ -258,6 +227,7 @@ export default function Voice() {
     setDetectedLangName(lang.name);
 
     go("thinking");
+    clearTts();
 
     try {
       const res = await fetch(`/api/conversations/${convId}/messages`, {
@@ -271,36 +241,96 @@ export default function Voice() {
 
       const reader = res.body.getReader();
       const dec = new TextDecoder();
-      let full = "";
+      let fullText = "";
+      let pending = "";
       let buf = "";
+      let speakingStarted = false;
+
+      const initSpeaking = (textSoFar: string) => {
+        if (speakingStarted) return;
+        speakingStarted = true;
+        // Pick TTS lang from response content
+        const rLang = detectResponseLang(textSoFar);
+        ttsLangRef.current =
+          rLang !== "en-US" ? rLang :
+          lang.code === "hinglish" ? "hi-IN" : "en-US";
+        startKeepAlive();
+        go("speaking");
+      };
+
+      // Sentence boundary pattern (also handles Hindi danda ।)
+      const sentenceRe = /[^.!?।\n]+[.!?।]+\s*/g;
 
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
+
         buf += dec.decode(value, { stream: true });
         const lines = buf.split("\n");
         buf = lines.pop() || "";
+
         for (const line of lines) {
           if (!line.startsWith("data: ")) continue;
           try {
             const d = JSON.parse(line.slice(6));
-            if (d.content) full += d.content;
+            if (d.done) continue;
+            if (!d.content) continue;
+
+            fullText += d.content;
+            pending += d.content;
+            setAiText(fullText);
+
+            // Extract and speak complete sentences immediately
+            let lastIdx = 0;
+            sentenceRe.lastIndex = 0;
+            let match: RegExpExecArray | null;
+            while ((match = sentenceRe.exec(pending)) !== null) {
+              const sentence = match[0].trim();
+              if (sentence) {
+                initSpeaking(fullText);
+                enqueueSentence(sentence);
+              }
+              lastIdx = sentenceRe.lastIndex;
+            }
+            pending = pending.slice(lastIdx);
           } catch {}
         }
       }
 
-      const reply = full.trim();
-      if (reply) {
-        setAiText(reply);
-        speak(reply);
-      } else {
-        go("idle");
+      // Speak any remaining text after stream ends
+      if (pending.trim()) {
+        initSpeaking(fullText);
+        enqueueSentence(pending);
       }
+
+      streamDoneRef.current = true;
+
+      // If nothing was spoken yet (e.g., very short reply)
+      if (!speakingStarted) {
+        if (fullText.trim()) {
+          initSpeaking(fullText);
+          enqueueSentence(fullText);
+        } else {
+          go("idle");
+          return;
+        }
+      }
+
+      // If queue already drained before stream marked done, finish now
+      if (!ttsBusyRef.current && ttsQueueRef.current.length === 0) {
+        onSpeechDone();
+      }
+
     } catch (err) {
       console.error("AI error:", err);
+      clearTts();
       const fallback = "Sorry, something went wrong. Please try again.";
       setAiText(fallback);
-      speak(fallback);
+      ttsLangRef.current = "en-US";
+      streamDoneRef.current = true;
+      go("speaking");
+      startKeepAlive();
+      enqueueSentence(fallback);
     }
   }
 
@@ -347,7 +377,7 @@ export default function Voice() {
       if (text) {
         askAI(text);
       } else if (activeRef.current) {
-        setTimeout(() => listen(), 300);
+        setTimeout(() => listen(), 100); // reduced from 300ms
       } else {
         go("idle");
       }
@@ -356,7 +386,7 @@ export default function Voice() {
     rec.onerror = (e: any) => {
       const recoverable = e.error === "no-speech" || e.error === "aborted";
       if (recoverable && activeRef.current && phaseRef.current === "listening") {
-        setTimeout(() => listen(), 300);
+        setTimeout(() => listen(), 100); // reduced from 300ms
       } else if (e.error === "not-allowed" || e.error === "service-not-allowed") {
         setSupported(false);
         go("idle");
@@ -377,12 +407,11 @@ export default function Voice() {
   function stopAll() {
     activeRef.current = false;
     setActive(false);
-    clearSynthTimers();
+    clearTts();
     if (recognitionRef.current) {
       try { recognitionRef.current.abort(); } catch {}
       recognitionRef.current = null;
     }
-    speechSynthesis.cancel();
     go("idle");
     setInterimText("");
   }
@@ -392,10 +421,9 @@ export default function Voice() {
     if (phaseRef.current === "thinking") return;
 
     if (phaseRef.current === "speaking") {
-      speechSynthesis.cancel();
-      clearSynthTimers();
+      clearTts();
       if (!activeRef.current) { activeRef.current = true; setActive(true); }
-      setTimeout(() => listen(), 100);
+      setTimeout(() => listen(), 80);
       return;
     }
 
@@ -417,7 +445,6 @@ export default function Voice() {
 
     if (!SR) { setSupported(false); setReady(true); return; }
 
-    // Trigger Chrome to load voices (lazy-loaded)
     const loadVoices = () => speechSynthesis.getVoices();
     loadVoices();
     speechSynthesis.onvoiceschanged = loadVoices;
@@ -453,9 +480,8 @@ export default function Voice() {
 
     return () => {
       activeRef.current = false;
-      clearSynthTimers();
+      clearTts();
       if (recognitionRef.current) { try { recognitionRef.current.abort(); } catch {} }
-      speechSynthesis.cancel();
     };
   }, []);
 
