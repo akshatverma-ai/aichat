@@ -2,19 +2,33 @@ import { useState, useEffect, useRef } from "react";
 import { useParams } from "wouter";
 import { Layout } from "@/components/Layout";
 import { motion, AnimatePresence } from "framer-motion";
-import { Mic, MicOff, Loader2, Send } from "lucide-react";
+import { Mic, MicOff, Loader2, Send, Globe, ChevronDown, Check } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
 import { AVATARS } from "@/lib/utils";
 
 type Phase = "idle" | "listening" | "thinking" | "speaking" | "error";
 
-function detectLangFromText(text: string): { code: string; name: string } {
-  if (/[\u0900-\u097F]/.test(text)) return { code: "hi-IN", name: "Hindi" };
-  if (/[\u0600-\u06FF]/.test(text)) return { code: "ar-SA", name: "Arabic" };
-  if (/[\u4E00-\u9FFF]/.test(text)) return { code: "zh-CN", name: "Chinese" };
-  if (/[\u3040-\u30FF]/.test(text)) return { code: "ja-JP", name: "Japanese" };
-  if (/[\uAC00-\uD7AF]/.test(text)) return { code: "ko-KR", name: "Korean" };
-  return { code: "en-US", name: "English" };
+interface LangOption { code: string; name: string; label: string; }
+
+const LANGUAGES: LangOption[] = [
+  { code: "en-US", name: "English", label: "🌐 ENGLISH" },
+  { code: "hi-IN", name: "Hindi",   label: "🌐 हिंदी"   },
+];
+
+function getStoredLang(): LangOption {
+  try {
+    const raw = localStorage.getItem("aichat_lang");
+    if (raw) {
+      const parsed = JSON.parse(raw) as { code: string; name: string };
+      const match = LANGUAGES.find((l) => l.code === parsed.code || l.name === parsed.name);
+      if (match) return match;
+    }
+  } catch {}
+  return LANGUAGES[0];
+}
+
+function saveLang(lang: LangOption) {
+  try { localStorage.setItem("aichat_lang", JSON.stringify({ code: lang.code, name: lang.name })); } catch {}
 }
 
 function getBestVoice(bcp47: string): SpeechSynthesisVoice | null {
@@ -38,22 +52,44 @@ export default function Voice() {
   const [userText, setUserText] = useState("");
   const [interimText, setInterimText] = useState("");
   const [aiText, setAiText] = useState("");
-  const [detectedLang, setDetectedLang] = useState("English");
   const [voiceSupported, setVoiceSupported] = useState(true);
   const [ready, setReady] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
 
-  // Fallback text input state
+  // Language selector
+  const [lang, setLang] = useState<LangOption>(getStoredLang);
+  const [showLangMenu, setShowLangMenu] = useState(false);
+  const langRef = useRef<LangOption>(lang);
+  useEffect(() => { langRef.current = lang; }, [lang]);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  // Fallback text input
   const [fallbackText, setFallbackText] = useState("");
   const [showFallback, setShowFallback] = useState(false);
 
   const convIdRef = useRef<number | null>(id ? parseInt(id) : null);
   const phaseRef = useRef<Phase>("idle");
   const recognitionRef = useRef<any>(null);
-  const ttsLangRef = useRef("en-US");
   const synthKeepAliveRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const avatarUrl = user ? AVATARS[user.avatar as keyof typeof AVATARS] : AVATARS.avatar1;
+
+  // Close language menu when clicking outside
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setShowLangMenu(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
+  function selectLanguage(option: LangOption) {
+    setLang(option);
+    saveLang(option);
+    setShowLangMenu(false);
+  }
 
   function go(p: Phase) {
     phaseRef.current = p;
@@ -75,56 +111,46 @@ export default function Voice() {
     speechSynthesis.cancel();
   }
 
-  function speakText(text: string, lang: string) {
+  function speakText(text: string, bcp47: string) {
     stopTts();
-    const voices = speechSynthesis.getVoices();
-    if (!voices.length) {
-      // voices not loaded yet — retry once after a short delay
-      setTimeout(() => speakText(text, lang), 300);
-      return;
-    }
-
-    const utter = new SpeechSynthesisUtterance(text);
-    utter.lang = lang;
-    utter.rate = lang === "hi-IN" ? 0.9 : 1.0;
-    const voice = getBestVoice(lang);
-    if (voice) utter.voice = voice;
-
-    // Chrome TTS keepalive (prevents auto-pause on long text)
-    synthKeepAliveRef.current = setInterval(() => {
-      if (speechSynthesis.paused) speechSynthesis.resume();
-    }, 5000);
-
-    utter.onend = () => {
-      if (synthKeepAliveRef.current) {
-        clearInterval(synthKeepAliveRef.current);
-        synthKeepAliveRef.current = null;
+    const trySpeak = () => {
+      const voices = speechSynthesis.getVoices();
+      if (!voices.length) {
+        setTimeout(trySpeak, 300);
+        return;
       }
-      go("idle");
-    };
 
-    utter.onerror = (e) => {
-      if (e.error === "interrupted") return;
-      if (synthKeepAliveRef.current) {
-        clearInterval(synthKeepAliveRef.current);
-        synthKeepAliveRef.current = null;
-      }
-      go("idle");
-    };
+      const utter = new SpeechSynthesisUtterance(text);
+      utter.lang = bcp47;
+      utter.rate = bcp47 === "hi-IN" ? 0.9 : 1.0;
+      const voice = getBestVoice(bcp47);
+      if (voice) utter.voice = voice;
 
-    go("speaking");
-    speechSynthesis.speak(utter);
+      synthKeepAliveRef.current = setInterval(() => {
+        if (speechSynthesis.paused) speechSynthesis.resume();
+      }, 5000);
+
+      utter.onend = () => {
+        if (synthKeepAliveRef.current) { clearInterval(synthKeepAliveRef.current); synthKeepAliveRef.current = null; }
+        go("idle");
+      };
+      utter.onerror = (e) => {
+        if (e.error === "interrupted") return;
+        if (synthKeepAliveRef.current) { clearInterval(synthKeepAliveRef.current); synthKeepAliveRef.current = null; }
+        go("idle");
+      };
+
+      go("speaking");
+      speechSynthesis.speak(utter);
+    };
+    trySpeak();
   }
 
   async function sendToAI(text: string) {
     const convId = convIdRef.current;
     if (!convId || !text.trim()) { go("idle"); return; }
 
-    const lang = detectLangFromText(text);
-    setDetectedLang(lang.name);
-    ttsLangRef.current = lang.code;
-    try { localStorage.setItem("aichat_lang", JSON.stringify(lang)); } catch {}
-
+    const selectedLang = langRef.current;
     go("thinking");
 
     try {
@@ -134,15 +160,13 @@ export default function Voice() {
         body: JSON.stringify({
           content: text,
           voiceMode: true,
-          detectedLang: lang.code,
-          detectedLangName: lang.name,
+          detectedLang: selectedLang.code,
+          detectedLangName: selectedLang.name,
         }),
         credentials: "include",
       });
 
-      if (!res.ok || !res.body) {
-        throw new Error(`Request failed: ${res.status}`);
-      }
+      if (!res.ok || !res.body) throw new Error(`Request failed: ${res.status}`);
 
       const reader = res.body.getReader();
       const dec = new TextDecoder();
@@ -152,53 +176,41 @@ export default function Voice() {
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
-
         buf += dec.decode(value, { stream: true });
         const lines = buf.split("\n");
         buf = lines.pop() || "";
-
         for (const line of lines) {
           if (!line.startsWith("data: ")) continue;
           try {
             const d = JSON.parse(line.slice(6));
-            if (d.content) {
-              fullText += d.content;
-              setAiText(fullText);
-            }
+            if (d.content) { fullText += d.content; setAiText(fullText); }
           } catch {}
         }
       }
 
-      if (!fullText.trim()) {
-        go("idle");
-        return;
-      }
+      if (!fullText.trim()) { go("idle"); return; }
 
       setAiText(fullText);
-      speakText(fullText, ttsLangRef.current);
+      speakText(fullText, selectedLang.code);
 
     } catch (err: any) {
       console.error("AI error:", err);
-      const fallbackReply = "Sorry, something went wrong. Please try again.";
-      setAiText(fallbackReply);
-      speakText(fallbackReply, "en-US");
+      const fallback = "Sorry, something went wrong. Please try again.";
+      setAiText(fallback);
+      speakText(fallback, "en-US");
     }
   }
 
   function startListening() {
     const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (!SR) {
-      setVoiceSupported(false);
-      setShowFallback(true);
-      return;
-    }
+    if (!SR) { setVoiceSupported(false); setShowFallback(true); return; }
     if (!convIdRef.current) return;
     if (phaseRef.current !== "idle") return;
 
     stopTts();
 
     const rec = new SR();
-    rec.lang = "en-US";
+    rec.lang = langRef.current.code;
     rec.continuous = false;
     rec.interimResults = true;
     rec.maxAlternatives = 1;
@@ -206,11 +218,7 @@ export default function Voice() {
 
     let finalTranscript = "";
 
-    rec.onstart = () => {
-      go("listening");
-      setInterimText("");
-      finalTranscript = "";
-    };
+    rec.onstart = () => { go("listening"); setInterimText(""); finalTranscript = ""; };
 
     rec.onresult = (e: any) => {
       let interim = "";
@@ -229,11 +237,7 @@ export default function Voice() {
       recognitionRef.current = null;
       setInterimText("");
       const text = finalTranscript.trim();
-      if (text) {
-        sendToAI(text);
-      } else {
-        go("idle");
-      }
+      if (text) { sendToAI(text); } else { go("idle"); }
     };
 
     rec.onerror = (e: any) => {
@@ -252,9 +256,7 @@ export default function Voice() {
       }
     };
 
-    try {
-      rec.start();
-    } catch (err) {
+    try { rec.start(); } catch (err) {
       console.error("Recognition start failed:", err);
       go("idle");
       setShowFallback(true);
@@ -263,25 +265,10 @@ export default function Voice() {
 
   function handleMicClick() {
     if (!ready) return;
-
-    if (phaseRef.current === "speaking") {
-      stopTts();
-      go("idle");
-      return;
-    }
-
-    if (phaseRef.current === "listening") {
-      stopRecognition();
-      go("idle");
-      return;
-    }
-
+    if (phaseRef.current === "speaking") { stopTts(); go("idle"); return; }
+    if (phaseRef.current === "listening") { stopRecognition(); go("idle"); return; }
     if (phaseRef.current === "thinking") return;
-
-    // idle → start listening
-    setUserText("");
-    setAiText("");
-    setErrorMsg("");
+    setUserText(""); setAiText(""); setErrorMsg("");
     startListening();
   }
 
@@ -289,18 +276,13 @@ export default function Voice() {
     e.preventDefault();
     const text = fallbackText.trim();
     if (!text || phaseRef.current === "thinking") return;
-    setFallbackText("");
-    setUserText(text);
-    setAiText("");
+    setFallbackText(""); setUserText(text); setAiText("");
     await sendToAI(text);
   }
 
   useEffect(() => {
     const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (!SR) {
-      setVoiceSupported(false);
-      setShowFallback(true);
-    }
+    if (!SR) { setVoiceSupported(false); setShowFallback(true); }
 
     speechSynthesis.getVoices();
     speechSynthesis.onvoiceschanged = () => speechSynthesis.getVoices();
@@ -311,11 +293,7 @@ export default function Voice() {
         const listRes = await fetch("/api/conversations", { credentials: "include" });
         if (listRes.ok) {
           const list = await listRes.json();
-          if (list?.length > 0) {
-            convIdRef.current = list[0].id;
-            setReady(true);
-            return;
-          }
+          if (list?.length > 0) { convIdRef.current = list[0].id; setReady(true); return; }
         }
         const createRes = await fetch("/api/conversations", {
           method: "POST",
@@ -335,42 +313,32 @@ export default function Voice() {
     };
 
     initConv();
-
-    return () => {
-      stopRecognition();
-      stopTts();
-    };
+    return () => { stopRecognition(); stopTts(); };
   }, []);
 
   const color =
     phase === "listening" ? "#ef4444"
     : phase === "thinking" ? "#fbbf24"
     : phase === "speaking" ? "#a78bfa"
-    : phase === "error"    ? "#ef4444"
     : "#00e5ff";
 
   const label =
     !ready                ? "⌛ INITIALIZING"
-    : phase === "listening" ? "🎙 LISTENING..."
+    : phase === "listening" ? `🎙 LISTENING · ${lang.name.toUpperCase()}`
     : phase === "thinking"  ? "⚙ THINKING..."
-    : phase === "speaking"  ? `🔊 SPEAKING · ${detectedLang}`
-    : phase === "error"     ? "⚠ ERROR"
+    : phase === "speaking"  ? `🔊 SPEAKING · ${lang.name.toUpperCase()}`
     : voiceSupported        ? "TAP TO TALK"
     : "TYPE TO CHAT";
 
   const panelText =
     phase === "listening"
       ? (userText ? `${userText} ${interimText}`.trim() : interimText || "Listening… speak now")
-      : phase === "thinking"
-      ? `"${userText}"`
-      : phase === "speaking"
-      ? aiText
-      : aiText
-      ? aiText
-      : userText
-      ? `"${userText}"`
+      : phase === "thinking" ? `"${userText}"`
+      : phase === "speaking" ? aiText
+      : aiText               ? aiText
+      : userText             ? `"${userText}"`
       : voiceSupported
-      ? "Tap the mic to start. The assistant will respond in your language."
+      ? `Tap the mic to start. The assistant will respond in ${lang.name}.`
       : errorMsg || "Type your message below.";
 
   const panelTag =
@@ -384,10 +352,57 @@ export default function Voice() {
 
   return (
     <Layout title="Aichat - Voice" showBack noPadding>
-      <div className="flex-1 flex flex-col items-center justify-between px-6 py-8 pt-24">
+      <div className="flex-1 flex flex-col items-center px-6 py-8 pt-20 relative">
+
+        {/* Language selector — top-right */}
+        <div ref={menuRef} className="absolute top-20 right-6 z-20">
+          <button
+            data-testid="button-lang-switcher"
+            onClick={() => setShowLangMenu((v) => !v)}
+            className="glass-panel px-3 py-1.5 rounded-lg flex items-center gap-1.5 cursor-pointer
+                       border border-primary/40 hover:border-primary/80 transition-colors"
+          >
+            <Globe className="w-3 h-3 text-primary" />
+            <span className="text-xs font-heading font-bold text-primary uppercase tracking-wider">
+              {lang.label}
+            </span>
+            <ChevronDown
+              className={`w-3 h-3 text-primary transition-transform duration-200 ${showLangMenu ? "rotate-180" : ""}`}
+            />
+          </button>
+
+          <AnimatePresence>
+            {showLangMenu && (
+              <motion.div
+                initial={{ opacity: 0, scale: 0.95, y: -4 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 0.95, y: -4 }}
+                transition={{ duration: 0.12 }}
+                className="absolute right-0 mt-1 w-40 rounded-xl overflow-hidden z-50
+                           bg-black/90 border border-primary/50 backdrop-blur-md
+                           shadow-[0_0_20px_rgba(0,229,255,0.25)]"
+              >
+                {LANGUAGES.map((option) => (
+                  <button
+                    key={option.code}
+                    data-testid={`button-lang-${option.code}`}
+                    onClick={() => selectLanguage(option)}
+                    className="w-full flex items-center justify-between px-4 py-2.5 text-left
+                               text-xs font-heading font-bold tracking-wider uppercase
+                               hover:bg-primary/20 transition-colors
+                               text-primary/80 hover:text-primary"
+                  >
+                    <span>{option.label}</span>
+                    {lang.code === option.code && <Check className="w-3 h-3 text-primary" />}
+                  </button>
+                ))}
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
 
         {/* Avatar */}
-        <div className="relative w-36 h-36 mb-6 flex-shrink-0">
+        <div className="relative w-36 h-36 mb-6 flex-shrink-0 mt-8">
           <motion.div
             animate={barsOn ? { scale: [1, 1.06, 1] } : { scale: 1 }}
             transition={{ duration: 1.2, repeat: barsOn ? Infinity : 0, ease: "easeInOut" }}
@@ -397,7 +412,6 @@ export default function Voice() {
             <img src={avatarUrl} alt="AI" className="w-full h-full object-cover" />
           </motion.div>
 
-          {/* Pulse rings */}
           {barsOn && (
             <>
               <motion.div
@@ -432,16 +446,14 @@ export default function Voice() {
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -8 }}
             transition={{ duration: 0.25 }}
-            className="w-full max-w-sm flex-1 min-h-[100px] max-h-[220px] overflow-y-auto"
+            className="w-full max-w-sm flex-1 min-h-[100px] max-h-[200px] overflow-y-auto"
           >
             {panelTag && (
               <p className="text-xs font-heading font-bold tracking-widest uppercase mb-2" style={{ color }}>
                 {panelTag}
               </p>
             )}
-            <p className="text-white/80 text-sm leading-relaxed">
-              {panelText}
-            </p>
+            <p className="text-white/80 text-sm leading-relaxed">{panelText}</p>
           </motion.div>
         </AnimatePresence>
 
@@ -453,15 +465,16 @@ export default function Voice() {
               onClick={handleMicClick}
               disabled={micDisabled}
               whileTap={!micDisabled ? { scale: 0.93 } : {}}
-              className="relative w-20 h-20 rounded-full flex items-center justify-center transition-all disabled:opacity-40"
+              className="relative w-20 h-20 rounded-full flex items-center justify-center
+                         transition-all disabled:opacity-40"
               style={{
-                background: phase === "listening"
-                  ? "#ef4444"
-                  : phase === "speaking"
-                  ? "#7c3aed"
+                background: phase === "listening" ? "#ef4444"
+                  : phase === "speaking" ? "#7c3aed"
                   : `${color}22`,
                 border: `2px solid ${color}`,
-                boxShadow: phase === "idle" ? `0 0 20px ${color}44` : `0 0 30px ${color}88`,
+                boxShadow: phase === "idle"
+                  ? `0 0 20px ${color}44`
+                  : `0 0 30px ${color}88`,
               }}
             >
               {phase === "thinking" ? (
@@ -474,9 +487,9 @@ export default function Voice() {
             </motion.button>
 
             <p className="text-white/30 text-xs font-heading tracking-wider">
-              {phase === "idle" ? "TAP MIC TO SPEAK" :
-               phase === "listening" ? "TAP TO STOP" :
-               phase === "speaking" ? "TAP TO INTERRUPT" : ""}
+              {phase === "idle"      ? "TAP MIC TO SPEAK"  :
+               phase === "listening" ? "TAP TO STOP"       :
+               phase === "speaking"  ? "TAP TO INTERRUPT"  : ""}
             </p>
           </div>
         )}
@@ -492,15 +505,18 @@ export default function Voice() {
               type="text"
               value={fallbackText}
               onChange={(e) => setFallbackText(e.target.value)}
-              placeholder="Type your message..."
+              placeholder={lang.code === "hi-IN" ? "यहाँ लिखें..." : "Type your message..."}
               disabled={phase === "thinking"}
-              className="flex-1 bg-black/50 border border-white/20 rounded-full px-4 py-3 text-white text-sm placeholder:text-white/40 focus:outline-none focus:border-primary"
+              className="flex-1 bg-black/50 border border-white/20 rounded-full px-4 py-3
+                         text-white text-sm placeholder:text-white/40
+                         focus:outline-none focus:border-primary"
               data-testid="input-fallback-message"
             />
             <button
               type="submit"
               disabled={!fallbackText.trim() || phase === "thinking"}
-              className="w-10 h-10 rounded-full bg-primary text-black flex items-center justify-center disabled:opacity-40 flex-shrink-0 self-center"
+              className="w-10 h-10 rounded-full bg-primary text-black flex items-center justify-center
+                         disabled:opacity-40 flex-shrink-0 self-center"
               data-testid="button-fallback-send"
             >
               <Send className="w-4 h-4" />
@@ -508,11 +524,12 @@ export default function Voice() {
           </form>
         )}
 
-        {/* Toggle fallback text input button */}
+        {/* Toggle text fallback */}
         {voiceSupported && phase === "idle" && (
           <button
             onClick={() => setShowFallback((v) => !v)}
-            className="mt-3 text-xs text-white/30 hover:text-white/60 transition-colors font-heading tracking-wider"
+            className="mt-3 text-xs text-white/30 hover:text-white/60 transition-colors
+                       font-heading tracking-wider"
             data-testid="button-toggle-text-input"
           >
             {showFallback ? "HIDE TEXT INPUT" : "TYPE INSTEAD"}

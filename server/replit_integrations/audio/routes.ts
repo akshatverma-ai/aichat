@@ -4,11 +4,13 @@ import { openai, speechToText, ensureCompatibleFormat } from "./client";
 
 const audioBodyParser = express.json({ limit: "50mb" });
 
-function buildSystemPrompt(_lang: string, _langName?: string): string {
+function buildSystemPrompt(_lang: string, langName?: string): string {
+  const langRule = langName
+    ? `Respond in ${langName}.`
+    : "Reply in the same language the user speaks.";
   return (
     "You are Aichat assistant. " +
-    "Always reply in the same language the user speaks. " +
-    "If the user writes in Hindi, reply in Hindi. If in English, reply in English. " +
+    langRule + " " +
     "Keep responses short and conversational — 1 to 3 sentences. " +
     "Answer the question directly. No bullet points, no markdown. " +
     "Speak like a knowledgeable friend talking face-to-face."

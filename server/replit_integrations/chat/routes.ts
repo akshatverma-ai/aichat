@@ -88,11 +88,14 @@ export function registerChatRoutes(app: Express): void {
 
       // For voice mode, prepend a concise spoken-response system prompt
       if (voiceMode) {
+        const langRule = detectedLangName
+          ? `Respond in ${detectedLangName}.`
+          : "Reply in the same language the user speaks.";
         chatMessages.unshift({
           role: "system",
           content:
             `You are Aichat assistant. ` +
-            `Always reply in the same language the user speaks. ` +
+            langRule + ` ` +
             `Keep responses short and conversational — 1 to 3 sentences. ` +
             `Answer the question directly. No bullet points, no markdown. ` +
             `Speak like a knowledgeable friend talking face-to-face.`,
