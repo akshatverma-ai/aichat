@@ -120,6 +120,17 @@ export async function registerRoutes(
     }
   });
 
+  // GET /api/config — fetch current avatar + personality configuration
+  app.get("/api/config", requireAuth, async (req, res) => {
+    try {
+      const user = await storage.getUser(req.session.userId!);
+      if (!user) return res.status(404).json({ message: "User not found" });
+      res.json({ avatar: user.avatar, personality: user.personality });
+    } catch {
+      res.status(500).json({ message: "Failed to fetch configuration" });
+    }
+  });
+
   // POST /api/config — save avatar + personality configuration
   app.post("/api/config", requireAuth, async (req, res) => {
     try {
