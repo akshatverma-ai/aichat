@@ -1,23 +1,13 @@
 import OpenAI from "openai";
 import { textToSpeech } from "../audio/client";
 
-let _openai: OpenAI | null = null;
 function getOpenAI(): OpenAI {
-  if (!_openai) {
-    _openai = new OpenAI({
-      apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.OPENAI_API_KEY,
-      baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
-    });
-  }
-  return _openai;
+  return new OpenAI({
+    apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.OPENAI_API_KEY,
+    baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
+  });
 }
-const openai = new Proxy({} as OpenAI, {
-  get(_target, prop) {
-    return (getOpenAI() as any)[prop];
-  },
-});
 
-// Build language-aware system + user messages for vision
 function buildVisionMessages(imageBase64: string, langName = "English") {
   const isHindi = langName.toLowerCase().includes("hindi") || langName.toLowerCase().includes("hinglish");
   const langInstruction = isHindi
@@ -57,7 +47,6 @@ EXPLANATION: [detailed explanation in 2-3 sentences in ${langName}]`;
   ];
 }
 
-// Pick the best TTS voice for the language
 function pickVoice(langCode?: string): "nova" | "shimmer" | "alloy" {
   if (!langCode) return "nova";
   if (langCode.startsWith("hi") || langCode === "hinglish") return "shimmer";
@@ -70,6 +59,7 @@ export async function detectAndExplainObject(
   lang?: string,
   langName = "English"
 ): Promise<{ objectName: string; explanation: string; audioBuffer: Buffer }> {
+  const openai = getOpenAI();
   const messages = buildVisionMessages(imageBase64, langName);
 
   const visionResponse = await openai.chat.completions.create({
@@ -87,7 +77,14 @@ export async function detectAndExplainObject(
 
   const ttsText = `${objectName}. ${explanation}`;
   const voice = pickVoice(lang);
-  const audioBuffer = await textToSpeech(ttsText, voice, "mp3");
+
+  let audioBuffer: Buffer;
+  try {
+    audioBuffer = await textToSpeech(ttsText, voice, "mp3");
+  } catch (ttsErr) {
+    console.warn("TTS failed for vision, continuing without audio:", ttsErr);
+    audioBuffer = Buffer.alloc(0);
+  }
 
   return { objectName, explanation, audioBuffer };
 }
@@ -99,6 +96,7 @@ export async function streamObjectDetection(
 ): Promise<AsyncIterable<{ type: "objectName" | "explanation" | "audio"; data: string | Buffer }>> {
   return (async function* () {
     try {
+      const openai = getOpenAI();
       const messages = buildVisionMessages(imageBase64, langName);
 
       const visionResponse = await openai.chat.completions.create({
@@ -117,10 +115,17 @@ export async function streamObjectDetection(
       yield { type: "objectName", data: objectName };
       yield { type: "explanation", data: explanation };
 
-      const ttsText = `${objectName}. ${explanation}`;
-      const voice = pickVoice(lang);
-      const audioBuffer = await textToSpeech(ttsText, voice, "mp3");
-      yield { type: "audio", data: audioBuffer };
+      // TTS is best-effort — if it fails, we still have text
+      try {
+        const ttsText = `${objectName}. ${explanation}`;
+        const voice = pickVoice(lang);
+        const audioBuffer = await textToSpeech(ttsText, voice, "mp3");
+        if (audioBuffer.length > 0) {
+          yield { type: "audio", data: audioBuffer };
+        }
+      } catch (ttsErr) {
+        console.warn("Vision TTS failed, skipping audio:", ttsErr);
+      }
     } catch (error) {
       console.error("Vision detection error:", error);
       throw error;

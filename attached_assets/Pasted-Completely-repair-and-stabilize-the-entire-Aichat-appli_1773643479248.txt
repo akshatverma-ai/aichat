@@ -1,0 +1,97 @@
+Completely repair and stabilize the entire Aichat application so all features work correctly in development and after deployment.
+
+Current problems:
+
+* Server sometimes crashes (tsx not found).
+* Voice assistant does not reliably listen or respond.
+* Login works but other screens sometimes fail.
+* Visual Assist only works partially.
+* The app behaves differently after publishing.
+* Some API requests fail with "Internal server error".
+
+Tasks:
+
+1. Fix server startup
+   Ensure all dependencies are installed and the server starts correctly.
+
+Install missing packages:
+npm install
+npm install tsx
+
+Ensure package.json contains a working script:
+
+"scripts": {
+"dev": "NODE_ENV=development tsx server/index.ts"
+}
+
+Ensure the server listens on:
+
+const PORT = process.env.PORT || 3000;
+
+2. Fix routing so all screens work
+
+Ensure React Router is configured correctly.
+
+Routes must exist for:
+/
+/login
+/chat
+/voice
+/camera
+/assist
+
+Use HashRouter so routing works after deployment.
+
+3. Fix voice assistant
+
+The voice assistant must:
+
+* Detect speech reliably
+* Respond immediately
+* Continue listening after responding
+
+Use Web Speech API:
+
+recognition.continuous = true
+recognition.interimResults = true
+recognition.maxAlternatives = 1
+
+Send the transcript to /api/chat immediately and speak the response.
+
+Ensure the assistant always replies after hearing the user.
+
+4. Improve response speed
+
+Use a fast model:
+
+model: "gpt-4o-mini"
+
+Remove unnecessary delays or loading timers.
+
+5. Fix Visual Assist (camera feature)
+
+Ensure the image is sent correctly to the backend.
+
+Add proper error handling so it never crashes with "Internal server error".
+
+6. Language support
+
+Allow switching between Hindi and English.
+
+If the user speaks Hindi → respond in Hindi.
+If the user speaks English → respond in English.
+
+7. Mobile compatibility
+
+Ensure all features work on mobile devices.
+
+Add viewport support and fix UI scaling.
+
+8. Deployment stability
+
+Ensure the application runs correctly after pressing "Publish".
+
+Dependencies must install automatically and the server must start without errors.
+
+Goal:
+The Aichat application should run smoothly with login, chat, voice assistant, and visual assist all working correctly on both desktop and mobile even after deployment.
