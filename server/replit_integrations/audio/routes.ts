@@ -4,37 +4,15 @@ import { openai, speechToText, ensureCompatibleFormat } from "./client";
 
 const audioBodyParser = express.json({ limit: "50mb" });
 
-function buildSystemPrompt(lang: string, langName?: string): string {
-  const base =
-    "You are Aichat, a smart and friendly voice assistant. " +
-    "You listen carefully and always give clear, helpful, and accurate answers. " +
+function buildSystemPrompt(_lang: string, _langName?: string): string {
+  return (
+    "You are Aichat assistant. " +
+    "Always reply in the same language the user speaks. " +
+    "If the user writes in Hindi, reply in Hindi. If in English, reply in English. " +
     "Keep responses short and conversational — 1 to 3 sentences. " +
     "Answer the question directly. No bullet points, no markdown. " +
-    "Speak like a knowledgeable friend talking face-to-face.";
-
-  const langMap: Record<string, string> = {
-    "hi-IN": "IMPORTANT: The user is speaking Hindi. You MUST reply entirely in Hindi (Devanagari script). Do not switch to English under any circumstance.",
-    "hinglish": "IMPORTANT: The user is speaking Hinglish (a natural mix of Hindi and English). Reply in the same Hinglish style — mix Hindi and English words naturally as the user does. Do not switch fully to either language.",
-    "ar-SA": "IMPORTANT: The user is speaking Arabic. You MUST reply entirely in Arabic.",
-    "zh-CN": "IMPORTANT: The user is speaking Chinese. You MUST reply in Simplified Chinese.",
-    "ja-JP": "IMPORTANT: The user is speaking Japanese. You MUST reply in Japanese.",
-    "ko-KR": "IMPORTANT: The user is speaking Korean. You MUST reply in Korean.",
-    "pa-IN": "IMPORTANT: The user is speaking Punjabi. You MUST reply in Punjabi.",
-    "ta-IN": "IMPORTANT: The user is speaking Tamil. You MUST reply in Tamil.",
-    "te-IN": "IMPORTANT: The user is speaking Telugu. You MUST reply in Telugu.",
-    "ml-IN": "IMPORTANT: The user is speaking Malayalam. You MUST reply in Malayalam.",
-    "bn-IN": "IMPORTANT: The user is speaking Bengali. You MUST reply in Bengali.",
-    "en-US": "The user is speaking English. Reply in natural, clear English.",
-  };
-
-  // If a human-readable name is given for an unmapped lang code, use a generic instruction
-  const langInstruction =
-    langMap[lang] ??
-    (langName
-      ? `IMPORTANT: The user is speaking ${langName}. Always reply in ${langName}.`
-      : "Always reply in the exact same language the user is speaking. Never switch languages.");
-
-  return `${base}\n\n${langInstruction}`;
+    "Speak like a knowledgeable friend talking face-to-face."
+  );
 }
 
 async function withRetry<T>(

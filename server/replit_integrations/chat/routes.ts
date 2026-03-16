@@ -86,25 +86,16 @@ export function registerChatRoutes(app: Express): void {
         content: m.content,
       }));
 
-      // For voice mode, prepend a multilingual system prompt for concise spoken responses
+      // For voice mode, prepend a concise spoken-response system prompt
       if (voiceMode) {
-        const langHint = detectedLangName && detectedLang && detectedLang !== "en-US"
-          ? `The user is speaking in ${detectedLangName}. You MUST reply ONLY in ${detectedLangName} — do not switch to English. `
-          : "";
         chatMessages.unshift({
           role: "system",
           content:
-            `You are Aichat, a smart and friendly voice assistant. You listen carefully and always give clear, helpful answers. ` +
-            `${langHint}` +
-            `LANGUAGE RULE (most important): Always reply in the exact same language the user is speaking. ` +
-            `If they speak Hindi → reply fully in Hindi. ` +
-            `If they speak English → reply in English. ` +
-            `If they speak Hinglish (mixed Hindi and English) → reply naturally in Hinglish. ` +
-            `Never translate the user's message into a different language unprompted. ` +
-            `\nSTYLE RULE: Keep responses short, warm, and conversational — 1 to 3 sentences at most. ` +
-            `Answer the question directly and clearly. No bullet points, no markdown, no long explanations. ` +
-            `Speak as if you are a knowledgeable friend talking face-to-face. ` +
-            `If the user asks something complex, give the key point first, then briefly explain.`,
+            `You are Aichat assistant. ` +
+            `Always reply in the same language the user speaks. ` +
+            `Keep responses short and conversational — 1 to 3 sentences. ` +
+            `Answer the question directly. No bullet points, no markdown. ` +
+            `Speak like a knowledgeable friend talking face-to-face.`,
         });
       } else {
         chatMessages.unshift({

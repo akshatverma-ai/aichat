@@ -2,87 +2,29 @@ import { useState, useEffect, useRef } from "react";
 import { useParams } from "wouter";
 import { Layout } from "@/components/Layout";
 import { motion, AnimatePresence } from "framer-motion";
-import { Mic, Square, Loader2, StopCircle } from "lucide-react";
+import { Mic, MicOff, Loader2, Send } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
 import { AVATARS } from "@/lib/utils";
 
-type Phase = "idle" | "listening" | "thinking" | "speaking";
+type Phase = "idle" | "listening" | "thinking" | "speaking" | "error";
 
-interface LangInfo {
-  code: string;
-  name: string;
-  recLang: string;
-}
-
-const HINGLISH_WORDS = new Set([
-  "kya","hai","nahi","nahin","haan","acha","theek","bhai","yaar","main","mein",
-  "tum","aap","woh","koi","kuch","bahut","bilkul","abhi","phir","toh","aur",
-  "magar","lekin","matlab","samajh","bolo","batao","karo","kar","hoga","hua",
-  "raha","rahi","chalte","chal","suno","dekho","laga","lagta","lagti","hoti",
-  "hota","teri","meri","iska","uska","apna","apni","achha","thoda","zyada",
-  "pata","neta","dost","paisa","kaam","ghar","sab","kaisa","kaisi","kaun",
-]);
-
-function detectLanguage(text: string): LangInfo {
-  if (/[\u0900-\u097F]/.test(text)) return { code: "hi-IN", name: "Hindi", recLang: "hi-IN" };
-  if (/[\u0600-\u06FF]/.test(text)) return { code: "ar-SA", name: "Arabic", recLang: "ar-SA" };
-  if (/[\u4E00-\u9FFF]/.test(text)) return { code: "zh-CN", name: "Chinese", recLang: "zh-CN" };
-  if (/[\u3040-\u30FF]/.test(text)) return { code: "ja-JP", name: "Japanese", recLang: "ja-JP" };
-  if (/[\uAC00-\uD7AF]/.test(text)) return { code: "ko-KR", name: "Korean", recLang: "ko-KR" };
-  if (/[\u0A00-\u0A7F]/.test(text)) return { code: "pa-IN", name: "Punjabi", recLang: "pa-IN" };
-  if (/[\u0B80-\u0BFF]/.test(text)) return { code: "ta-IN", name: "Tamil", recLang: "ta-IN" };
-  if (/[\u0C00-\u0C7F]/.test(text)) return { code: "te-IN", name: "Telugu", recLang: "te-IN" };
-  if (/[\u0D00-\u0D7F]/.test(text)) return { code: "ml-IN", name: "Malayalam", recLang: "ml-IN" };
-  if (/[\u0980-\u09FF]/.test(text)) return { code: "bn-IN", name: "Bengali", recLang: "bn-IN" };
-
-  const words = text.toLowerCase().match(/\b[a-z]+\b/g) || [];
-  if (words.length > 0) {
-    const hindiCount = words.filter((w) => HINGLISH_WORDS.has(w)).length;
-    if (hindiCount >= 2 || hindiCount / words.length >= 0.3) {
-      return { code: "hinglish", name: "Hinglish", recLang: "hi-IN" };
-    }
-  }
-
-  return { code: "en-US", name: "English", recLang: "en-US" };
-}
-
-function detectResponseLang(text: string): string {
-  if (/[\u0900-\u097F]/.test(text)) return "hi-IN";
-  if (/[\u0600-\u06FF]/.test(text)) return "ar-SA";
-  if (/[\u4E00-\u9FFF]/.test(text)) return "zh-CN";
-  if (/[\u3040-\u30FF]/.test(text)) return "ja-JP";
-  if (/[\uAC00-\uD7AF]/.test(text)) return "ko-KR";
-  if (/[\u0A00-\u0A7F]/.test(text)) return "pa-IN";
-  if (/[\u0B80-\u0BFF]/.test(text)) return "ta-IN";
-  if (/[\u0C00-\u0C7F]/.test(text)) return "te-IN";
-  if (/[\u0D00-\u0D7F]/.test(text)) return "ml-IN";
-  if (/[\u0980-\u09FF]/.test(text)) return "bn-IN";
-  return "en-US";
+function detectLangFromText(text: string): { code: string; name: string } {
+  if (/[\u0900-\u097F]/.test(text)) return { code: "hi-IN", name: "Hindi" };
+  if (/[\u0600-\u06FF]/.test(text)) return { code: "ar-SA", name: "Arabic" };
+  if (/[\u4E00-\u9FFF]/.test(text)) return { code: "zh-CN", name: "Chinese" };
+  if (/[\u3040-\u30FF]/.test(text)) return { code: "ja-JP", name: "Japanese" };
+  if (/[\uAC00-\uD7AF]/.test(text)) return { code: "ko-KR", name: "Korean" };
+  return { code: "en-US", name: "English" };
 }
 
 function getBestVoice(bcp47: string): SpeechSynthesisVoice | null {
   const voices = speechSynthesis.getVoices();
   if (!voices.length) return null;
-
   const lang2 = bcp47.slice(0, 2).toLowerCase();
-
-  if (bcp47 === "hi-IN") {
-    return (
-      voices.find((v) => v.lang === "hi-IN" && v.name.toLowerCase().includes("google")) ||
-      voices.find((v) => v.lang === "hi-IN") ||
-      voices.find((v) => v.lang.toLowerCase().startsWith("hi")) ||
-      voices.find((v) => /hindi|hemant|kalpana/i.test(v.name)) ||
-      voices[0] ||
-      null
-    );
-  }
-
   return (
-    voices.find((v) => v.name.toLowerCase().includes("google") && v.lang === bcp47) ||
-    voices.find((v) => v.name.toLowerCase().includes("google") && v.lang.toLowerCase().startsWith(lang2)) ||
+    voices.find((v) => v.lang === bcp47 && v.name.toLowerCase().includes("google")) ||
     voices.find((v) => v.lang === bcp47) ||
     voices.find((v) => v.lang.toLowerCase().startsWith(lang2)) ||
-    (lang2 === "en" ? voices.find((v) => /samantha|karen|moira|fiona|zira|hazel/i.test(v.name)) : null) ||
     voices[0] ||
     null
   );
@@ -96,35 +38,20 @@ export default function Voice() {
   const [userText, setUserText] = useState("");
   const [interimText, setInterimText] = useState("");
   const [aiText, setAiText] = useState("");
+  const [detectedLang, setDetectedLang] = useState("English");
+  const [voiceSupported, setVoiceSupported] = useState(true);
   const [ready, setReady] = useState(false);
-  const [supported, setSupported] = useState(true);
-  const [active, setActive] = useState(false);
-  const [detectedLangName, setDetectedLangName] = useState("English");
-  const [langLocked, setLangLocked] = useState(false);
+  const [errorMsg, setErrorMsg] = useState("");
+
+  // Fallback text input state
+  const [fallbackText, setFallbackText] = useState("");
+  const [showFallback, setShowFallback] = useState(false);
 
   const convIdRef = useRef<number | null>(id ? parseInt(id) : null);
   const phaseRef = useRef<Phase>("idle");
-  const activeRef = useRef(false);
   const recognitionRef = useRef<any>(null);
-  const detectedLangRef = useRef<LangInfo>({ code: "en-US", name: "English", recLang: "en-US" });
-  // Explicitly requested language (set by voice commands like "speak in Hindi")
-  // null = auto-detect from speech
-  const preferredLangRef = useRef<string | null>(null);
-
-  // TTS queue for progressive streaming speech
-  const ttsQueueRef = useRef<string[]>([]);
-  const ttsBusyRef = useRef(false);
-  const streamDoneRef = useRef(false);
   const ttsLangRef = useRef("en-US");
-
-  // Chrome keepalive & watchdog timers
   const synthKeepAliveRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const synthWatchdogRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  // Silence detection timer for continuous mode
-  const silenceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  // Accumulated final transcript across continuous results
-  const finalAccumRef = useRef("");
 
   const avatarUrl = user ? AVATARS[user.avatar as keyof typeof AVATARS] : AVATARS.avatar1;
 
@@ -133,166 +60,72 @@ export default function Voice() {
     setPhase(p);
   }
 
-  function clearSynthTimers() {
-    if (synthKeepAliveRef.current) { clearInterval(synthKeepAliveRef.current); synthKeepAliveRef.current = null; }
-    if (synthWatchdogRef.current) { clearTimeout(synthWatchdogRef.current); synthWatchdogRef.current = null; }
-  }
-
-  function clearTts() {
-    speechSynthesis.cancel();
-    clearSynthTimers();
-    ttsQueueRef.current = [];
-    ttsBusyRef.current = false;
-    streamDoneRef.current = false;
-  }
-
-  function onSpeechDone() {
-    clearSynthTimers();
-    if (activeRef.current) {
-      setTimeout(() => listen(), 150); // reduced from 450ms
-    } else {
-      go("idle");
+  function stopRecognition() {
+    if (recognitionRef.current) {
+      try { recognitionRef.current.stop(); } catch {}
+      recognitionRef.current = null;
     }
   }
 
-  // Speak one sentence and call drainQueue when done
-  function speakOneSentence(text: string) {
-    const lang = ttsLangRef.current;
-    const isHindi = lang === "hi-IN";
-    const selectedVoice = getBestVoice(lang);
+  function stopTts() {
+    if (synthKeepAliveRef.current) {
+      clearInterval(synthKeepAliveRef.current);
+      synthKeepAliveRef.current = null;
+    }
+    speechSynthesis.cancel();
+  }
+
+  function speakText(text: string, lang: string) {
+    stopTts();
+    const voices = speechSynthesis.getVoices();
+    if (!voices.length) {
+      // voices not loaded yet — retry once after a short delay
+      setTimeout(() => speakText(text, lang), 300);
+      return;
+    }
 
     const utter = new SpeechSynthesisUtterance(text);
     utter.lang = lang;
-    utter.rate = isHindi ? 0.88 : 1.0;
-    utter.pitch = 1.0;
-    utter.volume = 1;
-    if (selectedVoice) utter.voice = selectedVoice;
+    utter.rate = lang === "hi-IN" ? 0.9 : 1.0;
+    const voice = getBestVoice(lang);
+    if (voice) utter.voice = voice;
 
-    let fired = false;
-    const estimatedMs = (text.length / 130) * 1000 + 2000;
-
-    if (synthWatchdogRef.current) clearTimeout(synthWatchdogRef.current);
-    synthWatchdogRef.current = setTimeout(() => {
-      if (!fired) { fired = true; drainQueue(); }
-    }, estimatedMs);
-
-    utter.onend = () => {
-      if (!fired) {
-        fired = true;
-        clearSynthTimers();
-        setTimeout(() => drainQueue(), 60);
-      }
-    };
-
-    utter.onerror = (e) => {
-      if (!fired && e.error !== "interrupted") {
-        fired = true;
-        clearSynthTimers();
-        drainQueue();
-      }
-    };
-
-    speechSynthesis.speak(utter);
-  }
-
-  // Pull next sentence from queue or signal completion
-  function drainQueue() {
-    if (ttsQueueRef.current.length === 0) {
-      ttsBusyRef.current = false;
-      if (streamDoneRef.current) {
-        onSpeechDone();
-      }
-      return;
-    }
-    const sentence = ttsQueueRef.current.shift()!;
-    ttsBusyRef.current = true;
-    speakOneSentence(sentence);
-  }
-
-  // Add sentence to queue; start draining immediately if idle
-  function enqueueSentence(sentence: string) {
-    const s = sentence.trim();
-    if (!s) return;
-    ttsQueueRef.current.push(s);
-    if (!ttsBusyRef.current) {
-      drainQueue();
-    }
-  }
-
-  // Start keepalive for Chrome's TTS auto-pause bug
-  function startKeepAlive() {
-    if (synthKeepAliveRef.current) clearInterval(synthKeepAliveRef.current);
+    // Chrome TTS keepalive (prevents auto-pause on long text)
     synthKeepAliveRef.current = setInterval(() => {
       if (speechSynthesis.paused) speechSynthesis.resume();
     }, 5000);
-  }
 
-  // Returns the new LangInfo if a switch command was detected, null otherwise
-  function checkLangCommand(text: string): LangInfo | null {
-    const t = text.toLowerCase();
-
-    const hindi = /\b(hindi|हिंदी)\b|hindi (mein|me|mai)|speak.*hindi|switch.*hindi|use.*hindi/i;
-    const english = /\b(english|अंग्रेज़ी)\b|english (mein|me|mai)|speak.*english|switch.*english|use.*english/i;
-    const hinglish = /hinglish|mix.*language|dono.*bhasha/i;
-    const arabic = /\b(arabic|عربي)\b|speak.*arabic/i;
-
-    let switched: LangInfo | null = null;
-
-    if (hindi.test(t)) {
-      switched = { code: "hi-IN", name: "Hindi", recLang: "hi-IN" };
-      preferredLangRef.current = "hi-IN";
-    } else if (english.test(t)) {
-      switched = { code: "en-US", name: "English", recLang: "en-US" };
-      preferredLangRef.current = "en-US";
-    } else if (hinglish.test(t)) {
-      switched = { code: "hinglish", name: "Hinglish", recLang: "hi-IN" };
-      preferredLangRef.current = "hi-IN";
-    } else if (arabic.test(t)) {
-      switched = { code: "ar-SA", name: "Arabic", recLang: "ar-SA" };
-      preferredLangRef.current = "ar-SA";
-    }
-
-    if (switched) {
-      detectedLangRef.current = switched;
-      setDetectedLangName(switched.name);
-      setLangLocked(true);
-    }
-    return switched;
-  }
-
-  async function askAI(text: string, attempt = 0) {
-    const convId = convIdRef.current;
-    if (!convId) { go("idle"); return; }
-
-    // Check for explicit language switch commands first
-    const commandLang = checkLangCommand(text);
-
-    let lang: LangInfo;
-    if (commandLang) {
-      lang = commandLang;
-    } else if (preferredLangRef.current) {
-      const detected = detectLanguage(text);
-      if (detected.code !== "en-US" && detected.code !== "hinglish") {
-        lang = detected;
-        preferredLangRef.current = null;
-        setLangLocked(false);
-      } else {
-        lang = { ...detectedLangRef.current };
+    utter.onend = () => {
+      if (synthKeepAliveRef.current) {
+        clearInterval(synthKeepAliveRef.current);
+        synthKeepAliveRef.current = null;
       }
-    } else {
-      lang = detectLanguage(text);
-      if (lang.code === "en-US") { preferredLangRef.current = null; setLangLocked(false); }
-    }
+      go("idle");
+    };
 
-    detectedLangRef.current = lang;
-    setDetectedLangName(lang.name);
-    // Persist so other pages (e.g. Visual Assist) can pick up the user's language
-    try { localStorage.setItem("aichat_lang", JSON.stringify({ code: lang.code, name: lang.name })); } catch {}
+    utter.onerror = (e) => {
+      if (e.error === "interrupted") return;
+      if (synthKeepAliveRef.current) {
+        clearInterval(synthKeepAliveRef.current);
+        synthKeepAliveRef.current = null;
+      }
+      go("idle");
+    };
+
+    go("speaking");
+    speechSynthesis.speak(utter);
+  }
+
+  async function sendToAI(text: string) {
+    const convId = convIdRef.current;
+    if (!convId || !text.trim()) { go("idle"); return; }
+
+    const lang = detectLangFromText(text);
+    setDetectedLang(lang.name);
+    ttsLangRef.current = lang.code;
+    try { localStorage.setItem("aichat_lang", JSON.stringify(lang)); } catch {}
 
     go("thinking");
-    clearTts();
-
-    const MAX_RETRIES = 2;
 
     try {
       const res = await fetch(`/api/conversations/${convId}/messages`, {
@@ -307,39 +140,14 @@ export default function Voice() {
         credentials: "include",
       });
 
-      // Retry on server errors (5xx) but not client errors (4xx)
-      if (!res.ok) {
-        const status = res.status;
-        if (status >= 500 && attempt < MAX_RETRIES) {
-          await new Promise((r) => setTimeout(r, 600 * (attempt + 1)));
-          return askAI(text, attempt + 1);
-        }
-        throw new Error(`Server error ${status}`);
+      if (!res.ok || !res.body) {
+        throw new Error(`Request failed: ${res.status}`);
       }
-
-      if (!res.body) throw new Error("No response body");
 
       const reader = res.body.getReader();
       const dec = new TextDecoder();
       let fullText = "";
-      let pending = "";
       let buf = "";
-      let speakingStarted = false;
-      let streamErrored = false;
-
-      const initSpeaking = (textSoFar: string) => {
-        if (speakingStarted) return;
-        speakingStarted = true;
-        const rLang = detectResponseLang(textSoFar);
-        ttsLangRef.current =
-          rLang !== "en-US" ? rLang :
-          lang.code === "hinglish" ? "hi-IN" : "en-US";
-        startKeepAlive();
-        go("speaking");
-      };
-
-      // Sentence boundary pattern (also handles Hindi danda ।)
-      const sentenceRe = /[^.!?।\n]+[.!?।]+\s*/g;
 
       while (true) {
         const { done, value } = await reader.read();
@@ -353,194 +161,94 @@ export default function Voice() {
           if (!line.startsWith("data: ")) continue;
           try {
             const d = JSON.parse(line.slice(6));
-
-            // Handle server-sent error event
-            if (d.error && !d.done) {
-              console.warn("Stream error from server:", d.error);
-              streamErrored = true;
-              break;
+            if (d.content) {
+              fullText += d.content;
+              setAiText(fullText);
             }
-            if (d.done) continue;
-            if (!d.content) continue;
-
-            fullText += d.content;
-            pending += d.content;
-            setAiText(fullText);
-
-            // Speak complete sentences as they arrive
-            let lastIdx = 0;
-            sentenceRe.lastIndex = 0;
-            let match: RegExpExecArray | null;
-            while ((match = sentenceRe.exec(pending)) !== null) {
-              const sentence = match[0].trim();
-              if (sentence) {
-                initSpeaking(fullText);
-                enqueueSentence(sentence);
-              }
-              lastIdx = sentenceRe.lastIndex;
-            }
-            pending = pending.slice(lastIdx);
           } catch {}
         }
-        if (streamErrored) break;
       }
 
-      // Retry if server returned an error mid-stream and nothing was spoken
-      if (streamErrored && !fullText && attempt < MAX_RETRIES) {
-        clearTts();
-        await new Promise((r) => setTimeout(r, 600 * (attempt + 1)));
-        return askAI(text, attempt + 1);
+      if (!fullText.trim()) {
+        go("idle");
+        return;
       }
 
-      // Speak any remaining text
-      if (pending.trim()) {
-        initSpeaking(fullText);
-        enqueueSentence(pending);
-      }
-
-      streamDoneRef.current = true;
-
-      if (!speakingStarted) {
-        if (fullText.trim()) {
-          initSpeaking(fullText);
-          enqueueSentence(fullText);
-        } else {
-          // Empty response — restart listening
-          if (activeRef.current) setTimeout(() => listen(), 200);
-          else go("idle");
-          return;
-        }
-      }
-
-      if (!ttsBusyRef.current && ttsQueueRef.current.length === 0) {
-        onSpeechDone();
-      }
+      setAiText(fullText);
+      speakText(fullText, ttsLangRef.current);
 
     } catch (err: any) {
-      const msg = err?.message || String(err);
-      console.error("AI error:", msg);
-
-      // Retry on network failures
-      if ((msg.includes("fetch") || msg.includes("network") || msg.includes("Failed")) && attempt < MAX_RETRIES) {
-        clearTts();
-        await new Promise((r) => setTimeout(r, 800 * (attempt + 1)));
-        return askAI(text, attempt + 1);
-      }
-
-      clearTts();
-      const fallback = "Sorry, something went wrong. Please try again.";
-      setAiText(fallback);
-      ttsLangRef.current = "en-US";
-      streamDoneRef.current = true;
-      go("speaking");
-      startKeepAlive();
-      enqueueSentence(fallback);
+      console.error("AI error:", err);
+      const fallbackReply = "Sorry, something went wrong. Please try again.";
+      setAiText(fallbackReply);
+      speakText(fallbackReply, "en-US");
     }
   }
 
-  function clearSilenceTimer() {
-    if (silenceTimerRef.current) {
-      clearTimeout(silenceTimerRef.current);
-      silenceTimerRef.current = null;
+  function startListening() {
+    const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SR) {
+      setVoiceSupported(false);
+      setShowFallback(true);
+      return;
     }
-  }
+    if (!convIdRef.current) return;
+    if (phaseRef.current !== "idle") return;
 
-  function listen() {
-    const SR =
-      (window as any).SpeechRecognition ||
-      (window as any).webkitSpeechRecognition;
-
-    if (!SR) { setSupported(false); go("idle"); return; }
-    if (!convIdRef.current) { go("idle"); return; }
-    if (phaseRef.current === "listening") return;
+    stopTts();
 
     const rec = new SR();
-    rec.lang = preferredLangRef.current || detectedLangRef.current.recLang || "en-US";
-    rec.continuous = true;
+    rec.lang = "en-US";
+    rec.continuous = false;
     rec.interimResults = true;
     rec.maxAlternatives = 1;
     recognitionRef.current = rec;
 
-    // Reset accumulator for this session
-    finalAccumRef.current = "";
-
-    // Silence durations: shorter when sentence clearly ends with punctuation
-    const SILENCE_DEFAULT = 1000;
-    const SILENCE_PUNCTUATED = 600;
-    const SENTENCE_END_RE = /[.!?।]+\s*$/;
-
-    const stopAndSubmit = () => {
-      clearSilenceTimer();
-      try { rec.stop(); } catch {}
-      // onend will handle submission
-    };
+    let finalTranscript = "";
 
     rec.onstart = () => {
       go("listening");
       setInterimText("");
-      finalAccumRef.current = "";
+      finalTranscript = "";
     };
 
     rec.onresult = (e: any) => {
-      // Reset silence countdown on every new result
-      clearSilenceTimer();
-
       let interim = "";
-      let gotFinal = false;
       for (let i = e.resultIndex; i < e.results.length; i++) {
         if (e.results[i].isFinal) {
-          finalAccumRef.current += e.results[i][0].transcript + " ";
-          gotFinal = true;
+          finalTranscript += e.results[i][0].transcript + " ";
+          setUserText(finalTranscript.trim());
         } else {
           interim += e.results[i][0].transcript;
         }
       }
-
-      // Show real-time: interim text or the accumulated final so far
       setInterimText(interim);
-      const accumulated = finalAccumRef.current.trim();
-      if (accumulated) setUserText(accumulated);
-
-      // Use shorter silence window when sentence is clearly complete
-      const endsClean = gotFinal && SENTENCE_END_RE.test(accumulated);
-      const silenceMs = endsClean ? SILENCE_PUNCTUATED : SILENCE_DEFAULT;
-      silenceTimerRef.current = setTimeout(stopAndSubmit, silenceMs);
     };
 
     rec.onend = () => {
-      clearSilenceTimer();
+      recognitionRef.current = null;
       setInterimText("");
-      const text = finalAccumRef.current.trim();
-      finalAccumRef.current = "";
+      const text = finalTranscript.trim();
       if (text) {
-        askAI(text);
-      } else if (activeRef.current) {
-        // No speech detected — restart immediately to keep listening
-        setTimeout(() => listen(), 120);
+        sendToAI(text);
       } else {
         go("idle");
       }
     };
 
     rec.onerror = (e: any) => {
-      clearSilenceTimer();
-      if (e.error === "no-speech") {
-        // Browser timed out waiting for speech — restart immediately
-        if (activeRef.current && phaseRef.current === "listening") {
-          setTimeout(() => listen(), 100);
-        }
-      } else if (e.error === "aborted") {
-        // We called abort/stop — onend handles the rest
-      } else if (e.error === "not-allowed" || e.error === "service-not-allowed") {
-        setSupported(false);
+      recognitionRef.current = null;
+      setInterimText("");
+      if (e.error === "not-allowed" || e.error === "service-not-allowed") {
+        setVoiceSupported(false);
+        setShowFallback(true);
+        setErrorMsg("Microphone access denied. Please allow microphone access and try again.");
+        go("idle");
+      } else if (e.error === "no-speech") {
         go("idle");
       } else {
-        console.error("Recognition error:", e.error);
-        if (activeRef.current && phaseRef.current === "listening") {
-          setTimeout(() => listen(), 300);
-        } else {
-          go("idle");
-        }
+        console.warn("Speech recognition error:", e.error);
+        go("idle");
       }
     };
 
@@ -548,58 +256,54 @@ export default function Voice() {
       rec.start();
     } catch (err) {
       console.error("Recognition start failed:", err);
-      // Race condition — give it a moment then retry
-      if (activeRef.current) setTimeout(() => listen(), 250);
-      else go("idle");
+      go("idle");
+      setShowFallback(true);
     }
   }
 
-  function stopAll() {
-    activeRef.current = false;
-    setActive(false);
-    clearSilenceTimer();
-    finalAccumRef.current = "";
-    clearTts();
-    if (recognitionRef.current) {
-      try { recognitionRef.current.abort(); } catch {}
-      recognitionRef.current = null;
-    }
-    go("idle");
-    setInterimText("");
-  }
-
-  function handleButtonClick() {
-    if (!ready || !supported) return;
-    if (phaseRef.current === "thinking") return;
+  function handleMicClick() {
+    if (!ready) return;
 
     if (phaseRef.current === "speaking") {
-      clearTts();
-      if (!activeRef.current) { activeRef.current = true; setActive(true); }
-      setTimeout(() => listen(), 80);
+      stopTts();
+      go("idle");
       return;
     }
 
     if (phaseRef.current === "listening") {
-      stopAll();
+      stopRecognition();
+      go("idle");
       return;
     }
 
-    // Idle → start
-    activeRef.current = true;
-    setActive(true);
-    listen();
+    if (phaseRef.current === "thinking") return;
+
+    // idle → start listening
+    setUserText("");
+    setAiText("");
+    setErrorMsg("");
+    startListening();
+  }
+
+  async function handleFallbackSend(e: React.FormEvent) {
+    e.preventDefault();
+    const text = fallbackText.trim();
+    if (!text || phaseRef.current === "thinking") return;
+    setFallbackText("");
+    setUserText(text);
+    setAiText("");
+    await sendToAI(text);
   }
 
   useEffect(() => {
-    const SR =
-      (window as any).SpeechRecognition ||
-      (window as any).webkitSpeechRecognition;
+    const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SR) {
+      setVoiceSupported(false);
+      setShowFallback(true);
+    }
 
-    if (!SR) { setSupported(false); setReady(true); return; }
-
-    const loadVoices = () => speechSynthesis.getVoices();
-    loadVoices();
-    speechSynthesis.onvoiceschanged = loadVoices;
+    speechSynthesis.getVoices();
+    speechSynthesis.onvoiceschanged = () => speechSynthesis.getVoices();
 
     const initConv = async () => {
       if (convIdRef.current) { setReady(true); return; }
@@ -619,8 +323,10 @@ export default function Voice() {
           body: JSON.stringify({ title: "Voice Session" }),
           credentials: "include",
         });
-        const conv = await createRes.json();
-        convIdRef.current = conv.id;
+        if (createRes.ok) {
+          const conv = await createRes.json();
+          convIdRef.current = conv.id;
+        }
       } catch (e) {
         console.error("Conv init error:", e);
       } finally {
@@ -631,11 +337,8 @@ export default function Voice() {
     initConv();
 
     return () => {
-      activeRef.current = false;
-      clearSilenceTimer();
-      finalAccumRef.current = "";
-      clearTts();
-      if (recognitionRef.current) { try { recognitionRef.current.abort(); } catch {} }
+      stopRecognition();
+      stopTts();
     };
   }, []);
 
@@ -643,200 +346,178 @@ export default function Voice() {
     phase === "listening" ? "#ef4444"
     : phase === "thinking" ? "#fbbf24"
     : phase === "speaking" ? "#a78bfa"
+    : phase === "error"    ? "#ef4444"
     : "#00e5ff";
 
-  const activeLangName = detectedLangName;
-
   const label =
-    !ready ? "⌛ INITIALIZING"
-    : !supported ? "⚠ NOT SUPPORTED — USE CHROME"
-    : phase === "listening" ? `🎙️ LISTENING · ${activeLangName}`
-    : phase === "thinking"  ? "⚙️  THINKING"
-    : phase === "speaking"  ? `🔊 SPEAKING · ${activeLangName}`
-    : "✓  READY — TAP TO TALK";
-
-  const barsOn = phase === "listening" || phase === "speaking";
+    !ready                ? "⌛ INITIALIZING"
+    : phase === "listening" ? "🎙 LISTENING..."
+    : phase === "thinking"  ? "⚙ THINKING..."
+    : phase === "speaking"  ? `🔊 SPEAKING · ${detectedLang}`
+    : phase === "error"     ? "⚠ ERROR"
+    : voiceSupported        ? "TAP TO TALK"
+    : "TYPE TO CHAT";
 
   const panelText =
     phase === "listening"
-      ? (userText
-          ? `${userText}${interimText ? ` ${interimText}` : ''}`
-          : interimText || "Listening… speak now")
+      ? (userText ? `${userText} ${interimText}`.trim() : interimText || "Listening… speak now")
       : phase === "thinking"
       ? `"${userText}"`
       : phase === "speaking"
       ? aiText
+      : aiText
+      ? aiText
       : userText
       ? `"${userText}"`
-      : !supported
-      ? "Voice recognition is not supported in this browser. Please use Chrome or Edge."
-      : "Tap the mic button to start talking";
+      : voiceSupported
+      ? "Tap the mic to start. The assistant will respond in your language."
+      : errorMsg || "Type your message below.";
 
   const panelTag =
     phase === "listening" ? "YOU"
     : phase === "thinking" ? "YOU SAID"
     : phase === "speaking" ? "AI"
-    : "";
+    : aiText ? "AI" : "";
+
+  const micDisabled = !ready || phase === "thinking";
+  const barsOn = phase === "listening" || phase === "speaking";
 
   return (
-    <Layout title="Aichat - Voice Chat" showBack>
-      <div className="flex-1 flex flex-col items-center justify-between py-6 px-4 relative">
+    <Layout title="Aichat - Voice" showBack noPadding>
+      <div className="flex-1 flex flex-col items-center justify-between px-6 py-8 pt-24">
 
-        <div className="w-full text-center">
-          <div className="flex flex-col items-center gap-1.5 mb-5">
-            <motion.p
-              animate={{ opacity: [0.55, 1, 0.55] }}
-              transition={{ duration: 1.3, repeat: Infinity }}
-              className="text-[11px] font-heading font-bold tracking-[0.3em] text-center"
-              style={{ color }}
-            >
-              {label}
-            </motion.p>
-            {langLocked && (
-              <span className="text-[9px] font-heading px-2 py-0.5 rounded-full border border-white/15 text-white/40">
-                LOCKED · say "speak in English" to auto-detect
-              </span>
-            )}
-          </div>
-
-          {/* Waveform bars */}
-          <div className="h-16 flex items-center justify-center gap-[3px] mb-6">
-            {Array.from({ length: 24 }, (_, i) => (
-              <motion.div
-                key={i}
-                animate={
-                  barsOn
-                    ? { scaleY: [0.1, 1, 0.3, 0.8, 0.1], opacity: [0.5, 1, 0.6, 1, 0.5] }
-                    : { scaleY: 0.08, opacity: 0.2 }
-                }
-                transition={{
-                  duration: 0.7 + (i % 5) * 0.14,
-                  repeat: Infinity,
-                  repeatType: "mirror",
-                  delay: i * 0.04,
-                  ease: "easeInOut",
-                }}
-                className="w-[5px] h-14 rounded-full origin-center"
-                style={{
-                  background:
-                    phase === "speaking"
-                      ? `rgba(138,124,255,${0.45 + (i % 3) * 0.18})`
-                      : phase === "listening"
-                      ? `rgba(239,68,68,${0.45 + (i % 3) * 0.18})`
-                      : `rgba(0,229,255,${0.2 + (i % 3) * 0.1})`,
-                  boxShadow: barsOn
-                    ? phase === "speaking"
-                      ? "0 0 8px rgba(138,124,255,0.5)"
-                      : "0 0 8px rgba(239,68,68,0.5)"
-                    : "none",
-                }}
-              />
-            ))}
-          </div>
-
-          {/* Transcript panel */}
-          <div className="glass-panel rounded-2xl p-4 min-h-[110px] flex flex-col items-start justify-center text-left relative overflow-hidden">
-            {panelTag && (
-              <span
-                className="text-[10px] font-heading font-bold tracking-widest mb-2"
-                style={{ color, opacity: 0.65 }}
-              >
-                {panelTag}
-              </span>
-            )}
-            <AnimatePresence mode="wait">
-              <motion.p
-                key={phase + panelText.slice(0, 24)}
-                initial={{ opacity: 0, y: 5 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0 }}
-                transition={{ duration: 0.18 }}
-                className={`text-sm leading-relaxed ${
-                  phase === "speaking"
-                    ? "text-accent font-medium"
-                    : phase === "listening" && !userText && interimText
-                    ? "text-white/55 italic"
-                    : "text-white/80"
-                }`}
-              >
-                {panelText}
-              </motion.p>
-            </AnimatePresence>
-
-            {phase === "thinking" && (
-              <div className="absolute bottom-3 right-4 flex gap-1">
-                {[0, 1, 2].map((i) => (
-                  <motion.div
-                    key={i}
-                    animate={{ opacity: [0.2, 1, 0.2], scale: [0.7, 1.2, 0.7] }}
-                    transition={{ duration: 0.9, repeat: Infinity, delay: i * 0.28 }}
-                    className="w-2 h-2 rounded-full bg-yellow-400"
-                  />
-                ))}
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* Controls */}
-        <div className="flex flex-col items-center gap-4 mt-6 relative">
-          <div className="absolute inset-0 flex items-center justify-center pointer-events-none opacity-10 scale-[2.2] blur-xl">
-            <img src={avatarUrl} alt="" className="w-full h-full object-cover rounded-full mix-blend-screen" />
-          </div>
-
-          <motion.button
-            onClick={handleButtonClick}
-            disabled={!ready || !supported || phase === "thinking"}
-            data-testid="button-mic"
-            whileTap={{ scale: 0.9 }}
-            animate={
-              phase === "listening"
-                ? { scale: [1, 1.09, 1], boxShadow: ["0 0 25px rgba(239,68,68,0.4)", "0 0 55px rgba(239,68,68,0.75)", "0 0 25px rgba(239,68,68,0.4)"] }
-                : phase === "speaking"
-                ? { scale: [1, 1.05, 1], boxShadow: ["0 0 25px rgba(138,124,255,0.4)", "0 0 55px rgba(138,124,255,0.75)", "0 0 25px rgba(138,124,255,0.4)"] }
-                : { boxShadow: "0 0 30px rgba(0,229,255,0.35)" }
-            }
-            transition={{ duration: 1.3, repeat: Infinity }}
-            className={`relative z-10 w-24 h-24 rounded-full flex items-center justify-center transition-colors duration-300 disabled:opacity-35 disabled:cursor-not-allowed ${
-              phase === "listening" ? "bg-red-500 text-white"
-              : phase === "speaking" ? "bg-violet-500 text-white"
-              : phase === "thinking" ? "bg-yellow-500 text-black"
-              : "bg-primary text-black hover:brightness-110"
-            }`}
+        {/* Avatar */}
+        <div className="relative w-36 h-36 mb-6 flex-shrink-0">
+          <motion.div
+            animate={barsOn ? { scale: [1, 1.06, 1] } : { scale: 1 }}
+            transition={{ duration: 1.2, repeat: barsOn ? Infinity : 0, ease: "easeInOut" }}
+            className="w-full h-full rounded-full overflow-hidden border-2 shadow-lg"
+            style={{ borderColor: color, boxShadow: `0 0 24px ${color}55` }}
           >
-            {phase === "listening" ? (
-              <Square className="w-8 h-8 fill-current" />
-            ) : phase === "thinking" ? (
-              <Loader2 className="w-8 h-8 animate-spin" />
-            ) : (
-              <Mic className="w-9 h-9" />
-            )}
-          </motion.button>
+            <img src={avatarUrl} alt="AI" className="w-full h-full object-cover" />
+          </motion.div>
 
-          <p className="text-white/35 text-[11px] font-heading tracking-wider z-10 select-none text-center">
-            {phase === "listening" ? "Tap to stop"
-            : phase === "speaking" ? "Tap to interrupt & speak"
-            : phase === "thinking" ? "Generating response..."
-            : "Tap to start talking"}
-          </p>
-
-          <AnimatePresence>
-            {active && phase !== "idle" && (
-              <motion.button
-                initial={{ opacity: 0, y: 8 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: 8 }}
-                onClick={stopAll}
-                data-testid="button-stop"
-                className="z-10 flex items-center gap-2 px-5 py-2 rounded-full border border-white/15 bg-white/5 text-white/55 text-[11px] font-heading tracking-widest hover:bg-white/12 hover:text-white/80 transition-all"
-              >
-                <StopCircle className="w-3.5 h-3.5" />
-                END CONVERSATION
-              </motion.button>
-            )}
-          </AnimatePresence>
+          {/* Pulse rings */}
+          {barsOn && (
+            <>
+              <motion.div
+                animate={{ scale: [1, 1.5], opacity: [0.5, 0] }}
+                transition={{ duration: 1.5, repeat: Infinity, ease: "easeOut" }}
+                className="absolute inset-0 rounded-full border"
+                style={{ borderColor: color }}
+              />
+              <motion.div
+                animate={{ scale: [1, 1.8], opacity: [0.3, 0] }}
+                transition={{ duration: 1.5, repeat: Infinity, ease: "easeOut", delay: 0.4 }}
+                className="absolute inset-0 rounded-full border"
+                style={{ borderColor: color }}
+              />
+            </>
+          )}
         </div>
 
+        {/* Status label */}
+        <div
+          className="font-heading text-xs font-bold tracking-widest uppercase mb-4 transition-colors"
+          style={{ color }}
+        >
+          {label}
+        </div>
+
+        {/* Text panel */}
+        <AnimatePresence mode="wait">
+          <motion.div
+            key={panelText.slice(0, 30)}
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -8 }}
+            transition={{ duration: 0.25 }}
+            className="w-full max-w-sm flex-1 min-h-[100px] max-h-[220px] overflow-y-auto"
+          >
+            {panelTag && (
+              <p className="text-xs font-heading font-bold tracking-widest uppercase mb-2" style={{ color }}>
+                {panelTag}
+              </p>
+            )}
+            <p className="text-white/80 text-sm leading-relaxed">
+              {panelText}
+            </p>
+          </motion.div>
+        </AnimatePresence>
+
+        {/* Mic button */}
+        {voiceSupported && (
+          <div className="flex flex-col items-center gap-4 mt-6">
+            <motion.button
+              data-testid="button-mic"
+              onClick={handleMicClick}
+              disabled={micDisabled}
+              whileTap={!micDisabled ? { scale: 0.93 } : {}}
+              className="relative w-20 h-20 rounded-full flex items-center justify-center transition-all disabled:opacity-40"
+              style={{
+                background: phase === "listening"
+                  ? "#ef4444"
+                  : phase === "speaking"
+                  ? "#7c3aed"
+                  : `${color}22`,
+                border: `2px solid ${color}`,
+                boxShadow: phase === "idle" ? `0 0 20px ${color}44` : `0 0 30px ${color}88`,
+              }}
+            >
+              {phase === "thinking" ? (
+                <Loader2 className="w-8 h-8 animate-spin" style={{ color }} />
+              ) : phase === "listening" ? (
+                <MicOff className="w-8 h-8 text-white" />
+              ) : (
+                <Mic className="w-8 h-8" style={{ color }} />
+              )}
+            </motion.button>
+
+            <p className="text-white/30 text-xs font-heading tracking-wider">
+              {phase === "idle" ? "TAP MIC TO SPEAK" :
+               phase === "listening" ? "TAP TO STOP" :
+               phase === "speaking" ? "TAP TO INTERRUPT" : ""}
+            </p>
+          </div>
+        )}
+
+        {/* Text fallback input */}
+        {(showFallback || !voiceSupported) && (
+          <form
+            onSubmit={handleFallbackSend}
+            className="w-full max-w-sm mt-4 flex gap-2"
+            data-testid="form-fallback-chat"
+          >
+            <input
+              type="text"
+              value={fallbackText}
+              onChange={(e) => setFallbackText(e.target.value)}
+              placeholder="Type your message..."
+              disabled={phase === "thinking"}
+              className="flex-1 bg-black/50 border border-white/20 rounded-full px-4 py-3 text-white text-sm placeholder:text-white/40 focus:outline-none focus:border-primary"
+              data-testid="input-fallback-message"
+            />
+            <button
+              type="submit"
+              disabled={!fallbackText.trim() || phase === "thinking"}
+              className="w-10 h-10 rounded-full bg-primary text-black flex items-center justify-center disabled:opacity-40 flex-shrink-0 self-center"
+              data-testid="button-fallback-send"
+            >
+              <Send className="w-4 h-4" />
+            </button>
+          </form>
+        )}
+
+        {/* Toggle fallback text input button */}
+        {voiceSupported && phase === "idle" && (
+          <button
+            onClick={() => setShowFallback((v) => !v)}
+            className="mt-3 text-xs text-white/30 hover:text-white/60 transition-colors font-heading tracking-wider"
+            data-testid="button-toggle-text-input"
+          >
+            {showFallback ? "HIDE TEXT INPUT" : "TYPE INSTEAD"}
+          </button>
+        )}
       </div>
     </Layout>
   );
