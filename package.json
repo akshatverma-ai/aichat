@@ -4,7 +4,7 @@
   "type": "module",
   "license": "MIT",
   "scripts": {
-    "dev": "NODE_ENV=development node_modules/.bin/tsx server/index.ts",
+    "dev": "NODE_ENV=development tsx server/index.ts",
     "build": "tsx script/build.ts",
     "start": "NODE_ENV=production node dist/index.cjs",
     "check": "tsc",
@@ -76,6 +76,7 @@
     "vaul": "^1.1.2",
     "wouter": "^3.3.5",
     "ws": "^8.18.0",
+    "tsx": "^4.21.0",
     "zod": "^3.25.76",
     "zod-validation-error": "^3.5.4"
   },
@@ -100,7 +101,6 @@
     "esbuild": "^0.25.12",
     "postcss": "^8.4.47",
     "tailwindcss": "^3.4.17",
-    "tsx": "^4.21.0",
     "typescript": "^5.6.3",
     "vite": "^7.3.0"
   },
