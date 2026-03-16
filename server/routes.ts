@@ -28,6 +28,7 @@ export async function registerRoutes(
       saveUninitialized: false,
       cookie: {
         secure: process.env.NODE_ENV === "production",
+        sameSite: "lax",
         maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
       },
     })
@@ -55,7 +56,10 @@ export async function registerRoutes(
       }
       const user = await storage.createUser(input);
       req.session.userId = user.id;
-      res.status(201).json(user);
+      req.session.save((err) => {
+        if (err) return res.status(500).json({ message: "Session error" });
+        res.status(201).json(user);
+      });
     } catch (err) {
       if (err instanceof z.ZodError) {
         res.status(400).json({ message: err.errors[0].message, field: err.errors[0].path.join('.') });
@@ -73,7 +77,10 @@ export async function registerRoutes(
         return res.status(401).json({ message: "Invalid credentials" });
       }
       req.session.userId = user.id;
-      res.json(user);
+      req.session.save((err) => {
+        if (err) return res.status(500).json({ message: "Session error" });
+        res.json(user);
+      });
     } catch (err) {
       if (err instanceof z.ZodError) {
         res.status(400).json({ message: err.errors[0].message, field: err.errors[0].path.join('.') });
