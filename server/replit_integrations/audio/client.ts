@@ -247,16 +247,18 @@ export async function textToSpeechStream(
 /**
  * Speech-to-Text: Transcribes audio using dedicated transcription model.
  * Uses gpt-4o-mini-transcribe for accurate transcription.
+ * @param isoLang - ISO 639-1 language code (e.g. "en", "hi"). Defaults to "en".
  */
 export async function speechToText(
   audioBuffer: Buffer,
-  format: "wav" | "mp3" | "webm" = "wav"
+  format: "wav" | "mp3" | "webm" = "wav",
+  isoLang = "en"
 ): Promise<string> {
   const file = await toFile(audioBuffer, `audio.${format}`);
   const response = await openai.audio.transcriptions.create({
     file,
     model: "gpt-4o-mini-transcribe",
-    language: "en",
+    language: isoLang,
   });
   return response.text;
 }
