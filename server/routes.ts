@@ -147,42 +147,50 @@ export async function registerRoutes(
     }
   });
 
-  // POST /api/chat — simple text chat, finds or creates conversation, streams SSE response
-  app.post("/api/chat", requireAuth, express.json({ limit: "5mb" }), async (req, res) => {
+  // POST /api/chat — streams SSE response, works with or without auth session
+  app.post("/api/chat", express.json({ limit: "5mb" }), async (req, res) => {
     try {
-      const { content, conversationId, lang, langName } = req.body;
+      const { content, conversationId, history, lang, langName } = req.body;
       if (!content || typeof content !== "string" || !content.trim()) {
         return res.status(400).json({ message: "Message content is required" });
       }
 
-      let convId: number = conversationId;
+      const userId: number | undefined = req.session?.userId;
 
-      if (!convId) {
-        const convs = await storage.getConversations(req.session.userId!);
-        if (convs.length > 0) {
-          convId = convs[0].id;
-        } else {
-          const newConv = await storage.createConversation(req.session.userId!, "Main Session");
-          convId = newConv.id;
+      // Build chat history from either DB (authenticated) or client-provided history (guest)
+      let chatHistory: { role: "user" | "assistant"; content: string }[] = [];
+
+      if (userId) {
+        let convId: number = conversationId;
+        if (!convId) {
+          const convs = await storage.getConversations(userId);
+          convId = convs.length > 0
+            ? convs[0].id
+            : (await storage.createConversation(userId, "Main Session")).id;
         }
+        const conv = await storage.getConversation(convId);
+        if (conv && conv.userId === userId) {
+          await storage.createMessage(convId, "user", content.trim());
+          const allMessages = await storage.getMessages(convId);
+          chatHistory = allMessages.slice(-20).map((m) => ({
+            role: m.role as "user" | "assistant",
+            content: m.content,
+          }));
+          // Store convId so we can persist the assistant reply later
+          (req as any)._convId = convId;
+        }
+      } else if (Array.isArray(history)) {
+        // Guest mode: use client-supplied history
+        chatHistory = history
+          .filter((m: any) => m.role && m.content)
+          .slice(-20)
+          .map((m: any) => ({ role: m.role as "user" | "assistant", content: m.content }));
+        chatHistory.push({ role: "user", content: content.trim() });
+      } else {
+        chatHistory = [{ role: "user", content: content.trim() }];
       }
 
-      // Verify ownership
-      const conv = await storage.getConversation(convId);
-      if (!conv || conv.userId !== req.session.userId) {
-        return res.status(403).json({ message: "Forbidden" });
-      }
-
-      await storage.createMessage(convId, "user", content.trim());
-
-      const allMessages = await storage.getMessages(convId);
-      const recentMessages = allMessages.slice(-20);
-      const chatHistory = recentMessages.map((m) => ({
-        role: m.role as "user" | "assistant",
-        content: m.content,
-      }));
-
-      const user = await storage.getUser(req.session.userId!);
+      const user = userId ? await storage.getUser(userId) : null;
       const personalityMap: Record<string, string> = {
         Friendly: "You are warm, supportive, and encouraging.",
         Funny: "You are witty, playful, and like to make light-hearted jokes.",
@@ -221,15 +229,20 @@ export async function registerRoutes(
             res.write(`data: ${JSON.stringify({ content: delta })}\n\n`);
           }
         }
-        await storage.createMessage(convId, "assistant", fullResponse);
+
+        if (userId && (req as any)._convId) {
+          await storage.createMessage((req as any)._convId, "assistant", fullResponse);
+        }
       } catch (aiErr: any) {
         console.error("Chat AI error:", aiErr?.message);
-        const fallback = "I encountered an error. Please try again.";
+        const fallback = "I encountered an error processing your request. Please try again.";
         res.write(`data: ${JSON.stringify({ content: fallback })}\n\n`);
-        await storage.createMessage(convId, "assistant", fallback);
+        if (userId && (req as any)._convId) {
+          await storage.createMessage((req as any)._convId, "assistant", fallback);
+        }
       }
 
-      res.write(`data: ${JSON.stringify({ done: true, conversationId: convId })}\n\n`);
+      res.write(`data: ${JSON.stringify({ done: true, conversationId: (req as any)._convId ?? null })}\n\n`);
       res.end();
     } catch (err) {
       console.error("Chat route error:", err);
