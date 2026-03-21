@@ -65,7 +65,7 @@ export async function detectAndExplainObject(
   const visionResponse = await openai.chat.completions.create({
     model: "gpt-4o-mini",
     messages,
-    max_tokens: 500,
+    max_completion_tokens: 500,
   });
 
   const responseText = visionResponse.choices[0]?.message?.content || "";
@@ -102,7 +102,7 @@ export async function streamObjectDetection(
       const visionResponse = await openai.chat.completions.create({
         model: "gpt-4o-mini",
         messages,
-        max_tokens: 500,
+        max_completion_tokens: 500,
       });
 
       const responseText = visionResponse.choices[0]?.message?.content || "";

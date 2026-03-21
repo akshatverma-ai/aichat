@@ -1,8 +1,8 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef } from "react";
 import Webcam from "react-webcam";
 import { Layout } from "@/components/Layout";
 import { motion, AnimatePresence } from "framer-motion";
-import { ScanFace, Volume2, Globe, ChevronDown, Check } from "lucide-react";
+import { ScanFace, Volume2, Globe, ChevronDown, Check, Camera } from "lucide-react";
 
 interface LangOption { code: string; name: string; label: string; }
 
@@ -28,24 +28,25 @@ function saveLang(lang: LangOption) {
 }
 
 export default function CameraView() {
-  const [detectedObject, setDetectedObject] = useState<string>("Analyzing...");
+  const [detectedObject, setDetectedObject] = useState<string>("");
   const [explanation, setExplanation]       = useState<string>("");
   const [isProcessing, setIsProcessing]     = useState(false);
+  const [errorMsg, setErrorMsg]             = useState<string>("");
   const [audioUrl, setAudioUrl]             = useState<string>("");
   const [isPlaying, setIsPlaying]           = useState(false);
   const [lang, setLang]                     = useState<LangOption>(getStoredLang);
   const [showLangMenu, setShowLangMenu]     = useState(false);
+  const [webcamReady, setWebcamReady]       = useState(false);
 
-  // Keep a ref so captureAndAnalyze always sees the latest lang without re-creating the callback
-  const langRef = useRef<LangOption>(lang);
+  const langRef        = useRef<LangOption>(lang);
+  const isProcessingRef = useRef(false); // use ref to avoid stale closures in the interval
   useEffect(() => { langRef.current = lang; }, [lang]);
 
-  const webcamRef         = useRef<Webcam>(null);
-  const audioRef          = useRef<HTMLAudioElement | null>(null);
+  const webcamRef          = useRef<Webcam>(null);
+  const audioRef           = useRef<HTMLAudioElement | null>(null);
   const captureIntervalRef = useRef<NodeJS.Timeout | null>(null);
-  const menuRef           = useRef<HTMLDivElement>(null);
+  const menuRef            = useRef<HTMLDivElement>(null);
 
-  // Close dropdown when clicking outside
   useEffect(() => {
     const handler = (e: MouseEvent) => {
       if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
@@ -56,37 +57,34 @@ export default function CameraView() {
     return () => document.removeEventListener("mousedown", handler);
   }, []);
 
-  // Re-read language preference on window focus (user may have spoken in Voice tab)
   useEffect(() => {
-    const onFocus = () => {
-      const stored = getStoredLang();
-      setLang(stored);
-    };
+    const onFocus = () => { setLang(getStoredLang()); };
     window.addEventListener("focus", onFocus);
     return () => window.removeEventListener("focus", onFocus);
   }, []);
 
-  // Initialize audio element
   useEffect(() => {
-    if (!audioRef.current) {
-      const el = new Audio();
-      el.crossOrigin = "anonymous";
-      el.onended = () => setIsPlaying(false);
-      audioRef.current = el;
-    }
+    const el = new Audio();
+    el.crossOrigin = "anonymous";
+    el.onended = () => setIsPlaying(false);
+    audioRef.current = el;
     return () => {
       if (audioRef.current) { audioRef.current.pause(); audioRef.current.src = ""; }
     };
   }, []);
 
-  // Capture and analyze frames in real-time
-  const captureAndAnalyze = useCallback(async () => {
-    if (!webcamRef.current || isProcessing) return;
-    try {
-      setIsProcessing(true);
-      const imageSrc = webcamRef.current.getScreenshot();
-      if (!imageSrc) { setIsProcessing(false); return; }
+  async function captureAndAnalyze() {
+    if (isProcessingRef.current) return;
+    if (!webcamRef.current) return;
 
+    const imageSrc = webcamRef.current.getScreenshot();
+    if (!imageSrc) return;
+
+    isProcessingRef.current = true;
+    setIsProcessing(true);
+    setErrorMsg("");
+
+    try {
       const base64 = imageSrc.split(",")[1];
       const currentLang = langRef.current;
 
@@ -100,7 +98,12 @@ export default function CameraView() {
         }),
       });
 
-      if (!response.body) { setIsProcessing(false); return; }
+      if (!response.ok) {
+        const err = await response.json().catch(() => ({ error: "Detection failed" }));
+        throw new Error(err.error || `Server error ${response.status}`);
+      }
+
+      if (!response.body) throw new Error("No response body");
 
       const reader  = response.body.getReader();
       const decoder = new TextDecoder();
@@ -118,37 +121,49 @@ export default function CameraView() {
           if (!line.startsWith("data: ")) continue;
           try {
             const data = JSON.parse(line.slice(6));
+            if (data.error) throw new Error(data.error);
             if (data.type === "objectName") setDetectedObject(data.data);
             else if (data.type === "explanation") setExplanation(data.data);
             else if (data.type === "audio") setAudioUrl(`data:audio/mp3;base64,${data.data}`);
-          } catch {}
+          } catch (parseErr: any) {
+            if (parseErr.message && parseErr.message !== "Unexpected token") {
+              throw parseErr;
+            }
+          }
         }
       }
-      setIsProcessing(false);
-    } catch (error) {
+    } catch (error: any) {
       console.error("Vision detection error:", error);
-      setDetectedObject("Detection Error");
+      setErrorMsg(error.message || "Detection failed. Please try again.");
+      setDetectedObject("");
+    } finally {
+      isProcessingRef.current = false;
       setIsProcessing(false);
     }
-  }, [isProcessing]);
+  }
 
-  // Start real-time analysis loop
+  // Auto-analyze every 8 seconds once webcam is ready
   useEffect(() => {
-    if (!webcamRef.current) return;
+    if (!webcamReady) return;
+    // Initial analysis
+    captureAndAnalyze();
+    // Then repeat
     captureIntervalRef.current = setInterval(() => {
-      captureAndAnalyze().catch(console.error);
-    }, 4000);
-    return () => { if (captureIntervalRef.current) clearInterval(captureIntervalRef.current); };
-  }, [captureAndAnalyze]);
+      captureAndAnalyze();
+    }, 8000);
+    return () => {
+      if (captureIntervalRef.current) clearInterval(captureIntervalRef.current);
+    };
+  }, [webcamReady]);
 
   function selectLanguage(option: LangOption) {
     setLang(option);
     saveLang(option);
     setShowLangMenu(false);
-    // Clear previous results so next capture re-runs in the new language
-    setDetectedObject("Analyzing...");
+    setDetectedObject("");
     setExplanation("");
     setAudioUrl("");
+    setErrorMsg("");
     if (audioRef.current) { audioRef.current.pause(); audioRef.current.src = ""; }
     setIsPlaying(false);
   }
@@ -181,7 +196,11 @@ export default function CameraView() {
             ref={webcamRef}
             audio={false}
             videoConstraints={{ facingMode: "environment" }}
+            screenshotFormat="image/jpeg"
+            screenshotQuality={0.85}
             className="w-full h-full object-cover opacity-60"
+            onUserMedia={() => setWebcamReady(true)}
+            onUserMediaError={() => setErrorMsg("Camera access denied. Please allow camera access.")}
           />
           {/* Scanning frame */}
           <div className="absolute inset-0 border-2 border-primary/30 m-6 rounded-3xl pointer-events-none flex flex-col justify-between p-4">
@@ -211,7 +230,7 @@ export default function CameraView() {
             <div className="glass-panel px-4 py-2 rounded-lg flex items-center gap-2 pointer-events-none">
               <ScanFace className="w-4 h-4 text-primary" />
               <span className="text-xs font-heading font-bold text-primary tracking-widest uppercase">
-                OBJECT: {detectedObject}
+                {detectedObject ? `OBJECT: ${detectedObject}` : isProcessing ? "SCANNING..." : "POINT CAMERA AT OBJECT"}
               </span>
             </div>
 
@@ -265,6 +284,20 @@ export default function CameraView() {
             </div>
           </div>
 
+          {/* Error message */}
+          <AnimatePresence>
+            {errorMsg && !isProcessing && (
+              <motion.div
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0 }}
+                className="bg-red-900/80 border border-red-500/50 rounded-xl p-3 mt-auto mb-4 max-w-md"
+              >
+                <p className="text-red-300 text-xs">{errorMsg}</p>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
           {/* Description card */}
           <AnimatePresence>
             {explanation && (
@@ -298,11 +331,28 @@ export default function CameraView() {
             )}
           </AnimatePresence>
 
-          {/* Status badge */}
-          <div className="fixed bottom-6 left-6 glass-panel px-3 py-2 rounded-lg pointer-events-none">
-            <span className="text-xs font-heading font-bold text-primary/70 uppercase">
-              {isProcessing ? "⚙ PROCESSING..." : "✓ READY"}
-            </span>
+          {/* Bottom controls */}
+          <div className="flex items-center justify-between">
+            <div className="glass-panel px-3 py-2 rounded-lg pointer-events-none">
+              <span className="text-xs font-heading font-bold text-primary/70 uppercase">
+                {isProcessing ? "⚙ PROCESSING..." : webcamReady ? "✓ READY" : "⌛ LOADING..."}
+              </span>
+            </div>
+
+            {/* Manual scan button */}
+            <button
+              data-testid="button-scan-now"
+              onClick={() => captureAndAnalyze()}
+              disabled={isProcessing || !webcamReady}
+              className="glass-panel px-4 py-2 rounded-lg flex items-center gap-2
+                         border border-primary/40 hover:border-primary/80 transition-colors
+                         disabled:opacity-40 cursor-pointer"
+            >
+              <Camera className="w-4 h-4 text-primary" />
+              <span className="text-xs font-heading font-bold text-primary uppercase tracking-wider">
+                {isProcessing ? "SCANNING..." : "SCAN NOW"}
+              </span>
+            </button>
           </div>
         </div>
       </div>
