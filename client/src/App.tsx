@@ -1,10 +1,9 @@
-import { Switch, Route, Redirect, Router } from "wouter";
+import { Switch, Route, Router } from "wouter";
 import { useHashLocation } from "wouter/use-hash-location";
 import { queryClient } from "./lib/queryClient";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { useAuth } from "@/hooks/use-auth";
 
 // Pages
 import Splash from "@/pages/Splash";
@@ -17,13 +16,8 @@ import Camera from "@/pages/Camera";
 import Profile from "@/pages/Profile";
 import NotFound from "@/pages/not-found";
 
-// Auth Guard Component
+// Auth Guard Component - renders component without blocking access
 function ProtectedRoute({ component: Component, ...rest }: any) {
-  const { user, isLoading } = useAuth();
-
-  if (isLoading) return <Splash />;
-  if (!user) return <Redirect to="/login" />;
-
   return <Component {...rest} />;
 }
 

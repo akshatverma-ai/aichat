@@ -23,8 +23,7 @@ export default function Login() {
       if (isLogin) {
         const user = await login.mutateAsync({ email, password });
         if (user?.id) {
-          // Redirect immediately - data is already set in cache
-          setLocation("/home");
+          setLocation("/chat");
         }
       } else {
         const user = await register.mutateAsync({ email, password, name });
@@ -126,13 +125,20 @@ export default function Login() {
           </GlowingButton>
         </form>
 
-        <div className="mt-8 text-center">
+        <div className="mt-8 text-center space-y-3">
           <button
             type="button"
             onClick={() => { setIsLogin(!isLogin); setError(""); }}
-            className="text-sm text-muted-foreground hover:text-white transition-colors"
+            className="text-sm text-muted-foreground hover:text-white transition-colors block w-full"
           >
             {isLogin ? "No neural link found? Create one." : "Existing link detected? Initialize."}
+          </button>
+          <button
+            type="button"
+            onClick={() => setLocation("/chat")}
+            className="text-xs text-muted-foreground/50 hover:text-muted-foreground transition-colors"
+          >
+            Continue without logging in
           </button>
         </div>
       </motion.div>
