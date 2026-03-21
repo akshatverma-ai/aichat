@@ -1,10 +1,12 @@
 import { useState, useRef, useEffect } from "react";
 import { useParams } from "wouter";
 import { Layout } from "@/components/Layout";
+import { LangSelector } from "@/components/LangSelector";
 import { Send, Loader2 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/hooks/use-auth";
+import { getStoredLang, saveLang, type LangOption } from "@/lib/lang";
 
 type LocalMessage = {
   id: string | number;
@@ -21,7 +23,16 @@ export default function Chat() {
   const [messages, setMessages] = useState<LocalMessage[]>([]);
   const [input, setInput] = useState("");
   const [isSending, setIsSending] = useState(false);
+  const [lang, setLang] = useState<LangOption>(getStoredLang);
+  const [showLangMenu, setShowLangMenu] = useState(false);
+  const langRef = useRef<LangOption>(lang);
+  useEffect(() => { langRef.current = lang; }, [lang]);
   const bottomRef = useRef<HTMLDivElement>(null);
+
+  function selectLanguage(option: LangOption) {
+    setLang(option);
+    saveLang(option);
+  }
 
   // Load conversation history for authenticated users
   useEffect(() => {
@@ -50,7 +61,6 @@ export default function Chat() {
       return;
     }
 
-    // Find or create a conversation
     (async () => {
       try {
         const listRes = await fetch("/api/conversations", { credentials: "include" });
@@ -88,6 +98,7 @@ export default function Chat() {
     if (!input.trim() || isSending) return;
 
     const userContent = input.trim();
+    const currentLang = langRef.current;
     const userMsg: LocalMessage = { id: Date.now(), role: "user", content: userContent };
     const streamId = Date.now() + 1;
 
@@ -96,12 +107,14 @@ export default function Chat() {
     setIsSending(true);
 
     try {
-      const body: Record<string, any> = { content: userContent };
+      const body: Record<string, any> = {
+        content: userContent,
+        langName: currentLang.name,
+      };
 
       if (user && convId) {
         body.conversationId = convId;
       } else if (!user) {
-        // Pass existing messages as history for context (guest mode)
         body.history = messages
           .filter(m => !m.isStreaming && m.content)
           .map(m => ({ role: m.role, content: m.content }));
@@ -143,7 +156,6 @@ export default function Chat() {
               ));
             }
             if (data.done) {
-              // Update convId if server assigned one
               if (data.conversationId && !convId) setConvId(data.conversationId);
               setMessages(prev => prev.map(m =>
                 m.id === streamId ? { ...m, isStreaming: false } : m
@@ -155,7 +167,6 @@ export default function Chat() {
         }
       }
 
-      // Ensure streaming flag is cleared even if done event was missed
       setMessages(prev => prev.map(m =>
         m.id === streamId ? { ...m, isStreaming: false } : m
       ));
@@ -174,7 +185,19 @@ export default function Chat() {
   return (
     <Layout title="Aichat - Text Chat" showBack noPadding>
       <div className="flex-1 flex flex-col h-full pt-20 pb-4 px-4 relative">
-        <div className="flex-1 overflow-y-auto hide-scrollbar space-y-6 pb-20">
+
+        {/* Language selector — top-right below header */}
+        <div className="absolute top-[72px] right-4 z-20">
+          <LangSelector
+            lang={lang}
+            onSelect={selectLanguage}
+            open={showLangMenu}
+            onToggle={() => setShowLangMenu(v => !v)}
+            onClose={() => setShowLangMenu(false)}
+          />
+        </div>
+
+        <div className="flex-1 overflow-y-auto hide-scrollbar space-y-6 pb-20 pt-10">
           {!isReady && (
             <div className="flex justify-center py-10">
               <Loader2 className="w-8 h-8 text-primary animate-spin" />
@@ -183,7 +206,11 @@ export default function Chat() {
 
           {isReady && messages.length === 0 && (
             <div className="flex justify-center py-10">
-              <p className="text-white/30 text-sm font-heading tracking-wider">NEURAL LINK ESTABLISHED — BEGIN TRANSMISSION</p>
+              <p className="text-white/30 text-sm font-heading tracking-wider">
+                {lang.code === "hi-IN"
+                  ? "संचार शुरू करें..."
+                  : "NEURAL LINK ESTABLISHED — BEGIN TRANSMISSION"}
+              </p>
             </div>
           )}
 
@@ -225,7 +252,11 @@ export default function Chat() {
               type="text"
               value={input}
               onChange={(e) => setInput(e.target.value)}
-              placeholder={isReady ? "Transmit message..." : "Initializing..."}
+              placeholder={
+                !isReady ? "Initializing..."
+                : lang.code === "hi-IN" ? "संदेश लिखें..."
+                : "Transmit message..."
+              }
               className="w-full bg-black/60 border border-white/20 rounded-full py-4 pl-6 pr-14 text-white placeholder:text-white/40 focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary backdrop-blur-xl shadow-lg"
               disabled={isSending || !isReady}
               data-testid="input-chat-message"

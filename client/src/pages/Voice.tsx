@@ -1,36 +1,19 @@
 import { useState, useEffect, useRef } from "react";
 import { useParams } from "wouter";
 import { Layout } from "@/components/Layout";
+import { LangSelector } from "@/components/LangSelector";
 import { motion, AnimatePresence } from "framer-motion";
-import { Mic, MicOff, Loader2, Send, Globe, ChevronDown, Check } from "lucide-react";
+import { Mic, MicOff, Loader2, Send } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
 import { AVATARS } from "@/lib/utils";
+import { getStoredLang, saveLang, type LangOption } from "@/lib/lang";
 
 type Phase = "idle" | "listening" | "thinking" | "speaking" | "error";
 
-interface LangOption { code: string; name: string; label: string; }
 interface HistoryMsg { role: "user" | "assistant"; content: string; }
 
-const LANGUAGES: LangOption[] = [
-  { code: "en-US", name: "English", label: "🌐 ENGLISH" },
-  { code: "hi-IN", name: "Hindi",   label: "🌐 हिंदी"   },
-];
-
-function getStoredLang(): LangOption {
-  try {
-    const raw = localStorage.getItem("aichat_lang");
-    if (raw) {
-      const parsed = JSON.parse(raw) as { code: string; name: string };
-      const match = LANGUAGES.find((l) => l.code === parsed.code || l.name === parsed.name);
-      if (match) return match;
-    }
-  } catch {}
-  return LANGUAGES[0];
-}
-
-function saveLang(lang: LangOption) {
-  try { localStorage.setItem("aichat_lang", JSON.stringify({ code: lang.code, name: lang.name })); } catch {}
-}
+// Delay before re-enabling the mic after TTS ends (avoids capturing echoes)
+const TTS_ECHO_GUARD_MS = 400;
 
 function getBestVoice(bcp47: string): SpeechSynthesisVoice | null {
   const voices = speechSynthesis.getVoices();
@@ -44,9 +27,6 @@ function getBestVoice(bcp47: string): SpeechSynthesisVoice | null {
     null
   );
 }
-
-// Delay before re-enabling the mic after TTS ends (avoids capturing echoes)
-const TTS_ECHO_GUARD_MS = 400;
 
 export default function Voice() {
   const { id } = useParams();
@@ -64,7 +44,6 @@ export default function Voice() {
   const [showLangMenu, setShowLangMenu] = useState(false);
   const langRef = useRef<LangOption>(lang);
   useEffect(() => { langRef.current = lang; }, [lang]);
-  const menuRef = useRef<HTMLDivElement>(null);
 
   const [fallbackText, setFallbackText] = useState("");
   const [showFallback, setShowFallback] = useState(false);
@@ -78,22 +57,6 @@ export default function Voice() {
   const echoGuardRef = useRef(false);
 
   const avatarUrl = user ? AVATARS[user.avatar as keyof typeof AVATARS] : AVATARS.avatar1;
-
-  useEffect(() => {
-    const handler = (e: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
-        setShowLangMenu(false);
-      }
-    };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, []);
-
-  function selectLanguage(option: LangOption) {
-    setLang(option);
-    saveLang(option);
-    setShowLangMenu(false);
-  }
 
   function go(p: Phase) {
     phaseRef.current = p;
@@ -411,50 +374,14 @@ export default function Voice() {
       <div className="flex-1 flex flex-col items-center px-6 py-8 pt-20 relative">
 
         {/* Language selector */}
-        <div ref={menuRef} className="absolute top-20 right-6 z-20">
-          <button
-            data-testid="button-lang-switcher"
-            onClick={() => setShowLangMenu((v) => !v)}
-            className="glass-panel px-3 py-1.5 rounded-lg flex items-center gap-1.5 cursor-pointer
-                       border border-primary/40 hover:border-primary/80 transition-colors"
-          >
-            <Globe className="w-3 h-3 text-primary" />
-            <span className="text-xs font-heading font-bold text-primary uppercase tracking-wider">
-              {lang.label}
-            </span>
-            <ChevronDown
-              className={`w-3 h-3 text-primary transition-transform duration-200 ${showLangMenu ? "rotate-180" : ""}`}
-            />
-          </button>
-
-          <AnimatePresence>
-            {showLangMenu && (
-              <motion.div
-                initial={{ opacity: 0, scale: 0.95, y: -4 }}
-                animate={{ opacity: 1, scale: 1, y: 0 }}
-                exit={{ opacity: 0, scale: 0.95, y: -4 }}
-                transition={{ duration: 0.12 }}
-                className="absolute right-0 mt-1 w-40 rounded-xl overflow-hidden z-50
-                           bg-black/90 border border-primary/50 backdrop-blur-md
-                           shadow-[0_0_20px_rgba(0,229,255,0.25)]"
-              >
-                {LANGUAGES.map((option) => (
-                  <button
-                    key={option.code}
-                    data-testid={`button-lang-${option.code}`}
-                    onClick={() => selectLanguage(option)}
-                    className="w-full flex items-center justify-between px-4 py-2.5 text-left
-                               text-xs font-heading font-bold tracking-wider uppercase
-                               hover:bg-primary/20 transition-colors
-                               text-primary/80 hover:text-primary"
-                  >
-                    <span>{option.label}</span>
-                    {lang.code === option.code && <Check className="w-3 h-3 text-primary" />}
-                  </button>
-                ))}
-              </motion.div>
-            )}
-          </AnimatePresence>
+        <div className="absolute top-20 right-6 z-20">
+          <LangSelector
+            lang={lang}
+            onSelect={(option) => { setLang(option); saveLang(option); }}
+            open={showLangMenu}
+            onToggle={() => setShowLangMenu(v => !v)}
+            onClose={() => setShowLangMenu(false)}
+          />
         </div>
 
         {/* Avatar */}

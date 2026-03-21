@@ -1,31 +1,10 @@
 import { useState, useEffect, useRef } from "react";
 import Webcam from "react-webcam";
 import { Layout } from "@/components/Layout";
+import { LangSelector } from "@/components/LangSelector";
 import { motion, AnimatePresence } from "framer-motion";
-import { ScanFace, Volume2, Globe, ChevronDown, Check, Camera } from "lucide-react";
-
-interface LangOption { code: string; name: string; label: string; }
-
-const LANGUAGES: LangOption[] = [
-  { code: "en-US", name: "English",  label: "🌐 ENGLISH" },
-  { code: "hi-IN", name: "Hindi",    label: "🌐 हिंदी"   },
-];
-
-function getStoredLang(): LangOption {
-  try {
-    const raw = localStorage.getItem("aichat_lang");
-    if (raw) {
-      const parsed = JSON.parse(raw) as { code: string; name: string };
-      const match = LANGUAGES.find((l) => l.code === parsed.code || l.name === parsed.name);
-      if (match) return match;
-    }
-  } catch {}
-  return LANGUAGES[0];
-}
-
-function saveLang(lang: LangOption) {
-  try { localStorage.setItem("aichat_lang", JSON.stringify({ code: lang.code, name: lang.name })); } catch {}
-}
+import { ScanFace, Volume2, Camera } from "lucide-react";
+import { getStoredLang, saveLang, type LangOption } from "@/lib/lang";
 
 export default function CameraView() {
   const [detectedObject, setDetectedObject] = useState<string>("");
@@ -45,17 +24,6 @@ export default function CameraView() {
   const webcamRef          = useRef<Webcam>(null);
   const audioRef           = useRef<HTMLAudioElement | null>(null);
   const captureIntervalRef = useRef<NodeJS.Timeout | null>(null);
-  const menuRef            = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    const handler = (e: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
-        setShowLangMenu(false);
-      }
-    };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, []);
 
   useEffect(() => {
     const onFocus = () => { setLang(getStoredLang()); };
@@ -156,18 +124,6 @@ export default function CameraView() {
     };
   }, [webcamReady]);
 
-  function selectLanguage(option: LangOption) {
-    setLang(option);
-    saveLang(option);
-    setShowLangMenu(false);
-    setDetectedObject("");
-    setExplanation("");
-    setAudioUrl("");
-    setErrorMsg("");
-    if (audioRef.current) { audioRef.current.pause(); audioRef.current.src = ""; }
-    setIsPlaying(false);
-  }
-
   const playAudio = async () => {
     if (!audioRef.current || !audioUrl) return;
     try {
@@ -235,53 +191,23 @@ export default function CameraView() {
             </div>
 
             {/* Language switcher */}
-            <div ref={menuRef} className="relative">
-              <button
-                data-testid="button-lang-switcher"
-                onClick={() => setShowLangMenu((v) => !v)}
-                className="glass-panel px-3 py-1.5 rounded-lg flex items-center gap-1.5 cursor-pointer
-                           border border-primary/40 hover:border-primary/80 transition-colors"
-              >
-                <Globe className="w-3 h-3 text-primary" />
-                <span className="text-xs font-heading font-bold text-primary uppercase tracking-wider">
-                  {lang.label}
-                </span>
-                <ChevronDown
-                  className={`w-3 h-3 text-primary transition-transform duration-200 ${showLangMenu ? "rotate-180" : ""}`}
-                />
-              </button>
-
-              <AnimatePresence>
-                {showLangMenu && (
-                  <motion.div
-                    initial={{ opacity: 0, scale: 0.95, y: -4 }}
-                    animate={{ opacity: 1, scale: 1, y: 0 }}
-                    exit={{ opacity: 0, scale: 0.95, y: -4 }}
-                    transition={{ duration: 0.12 }}
-                    className="absolute right-0 mt-1 w-40 rounded-xl overflow-hidden z-50
-                               bg-black/90 border border-primary/50 backdrop-blur-md
-                               shadow-[0_0_20px_rgba(0,229,255,0.25)]"
-                  >
-                    {LANGUAGES.map((option) => (
-                      <button
-                        key={option.code}
-                        data-testid={`button-lang-${option.code}`}
-                        onClick={() => selectLanguage(option)}
-                        className="w-full flex items-center justify-between px-4 py-2.5 text-left
-                                   text-xs font-heading font-bold tracking-wider uppercase
-                                   hover:bg-primary/20 transition-colors
-                                   text-primary/80 hover:text-primary"
-                      >
-                        <span>{option.label}</span>
-                        {lang.code === option.code && (
-                          <Check className="w-3 h-3 text-primary" />
-                        )}
-                      </button>
-                    ))}
-                  </motion.div>
-                )}
-              </AnimatePresence>
-            </div>
+            <LangSelector
+              lang={lang}
+              onSelect={(option) => {
+                setLang(option);
+                saveLang(option);
+                setShowLangMenu(false);
+                setDetectedObject("");
+                setExplanation("");
+                setAudioUrl("");
+                setErrorMsg("");
+                if (audioRef.current) { audioRef.current.pause(); audioRef.current.src = ""; }
+                setIsPlaying(false);
+              }}
+              open={showLangMenu}
+              onToggle={() => setShowLangMenu(v => !v)}
+              onClose={() => setShowLangMenu(false)}
+            />
           </div>
 
           {/* Error message */}
