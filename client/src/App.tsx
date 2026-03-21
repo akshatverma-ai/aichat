@@ -24,7 +24,8 @@ function ProtectedRoute({ component: Component, ...rest }: any) {
 function AppRouter() {
   return (
     <Switch>
-      <Route path="/" component={Splash} />
+      <Route path="/" component={Chat} />
+      <Route path="/splash" component={Splash} />
       <Route path="/login" component={Login} />
 
       <Route path="/setup">

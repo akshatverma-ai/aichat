@@ -21,7 +21,7 @@ export function Layout({ children, title, showBack = false, noPadding = false }:
         <header className="absolute top-0 w-full z-50 px-4 py-4 sm:px-6 sm:py-6 flex items-center justify-between pointer-events-none">
           {showBack ? (
             <button
-              onClick={() => setLocation("/home")}
+              onClick={() => setLocation("/")}
               className="w-10 h-10 rounded-full glass-panel flex items-center justify-center text-white/70 hover:text-primary transition-colors pointer-events-auto touch-target"
               aria-label="Go back"
               data-testid="button-back"
