@@ -9,6 +9,7 @@ import { AVATARS } from "@/lib/utils";
 type Phase = "idle" | "listening" | "thinking" | "speaking" | "error";
 
 interface LangOption { code: string; name: string; label: string; }
+interface HistoryMsg { role: "user" | "assistant"; content: string; }
 
 const LANGUAGES: LangOption[] = [
   { code: "en-US", name: "English", label: "🌐 ENGLISH" },
@@ -44,6 +45,9 @@ function getBestVoice(bcp47: string): SpeechSynthesisVoice | null {
   );
 }
 
+// Delay before re-enabling the mic after TTS ends (avoids capturing echoes)
+const TTS_ECHO_GUARD_MS = 400;
+
 export default function Voice() {
   const { id } = useParams();
   const { user } = useAuth();
@@ -56,25 +60,25 @@ export default function Voice() {
   const [ready, setReady] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
 
-  // Language selector
   const [lang, setLang] = useState<LangOption>(getStoredLang);
   const [showLangMenu, setShowLangMenu] = useState(false);
   const langRef = useRef<LangOption>(lang);
   useEffect(() => { langRef.current = lang; }, [lang]);
   const menuRef = useRef<HTMLDivElement>(null);
 
-  // Fallback text input
   const [fallbackText, setFallbackText] = useState("");
   const [showFallback, setShowFallback] = useState(false);
 
   const convIdRef = useRef<number | null>(id ? parseInt(id) : null);
+  const historyRef = useRef<HistoryMsg[]>([]);
   const phaseRef = useRef<Phase>("idle");
   const recognitionRef = useRef<any>(null);
   const synthKeepAliveRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // Prevents the mic from activating immediately after TTS stops
+  const echoGuardRef = useRef(false);
 
   const avatarUrl = user ? AVATARS[user.avatar as keyof typeof AVATARS] : AVATARS.avatar1;
 
-  // Close language menu when clicking outside
   useEffect(() => {
     const handler = (e: MouseEvent) => {
       if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
@@ -98,7 +102,7 @@ export default function Voice() {
 
   function stopRecognition() {
     if (recognitionRef.current) {
-      try { recognitionRef.current.stop(); } catch {}
+      try { recognitionRef.current.abort(); } catch {}
       recognitionRef.current = null;
     }
   }
@@ -112,7 +116,10 @@ export default function Voice() {
   }
 
   function speakText(text: string, bcp47: string) {
+    // Make absolutely sure the mic is off before TTS starts
+    stopRecognition();
     stopTts();
+
     const trySpeak = () => {
       const voices = speechSynthesis.getVoices();
       if (!voices.length) {
@@ -130,39 +137,53 @@ export default function Voice() {
         if (speechSynthesis.paused) speechSynthesis.resume();
       }, 5000);
 
-      utter.onend = () => {
+      const onDone = () => {
         if (synthKeepAliveRef.current) { clearInterval(synthKeepAliveRef.current); synthKeepAliveRef.current = null; }
+        // Echo guard: briefly block mic activation after TTS ends
+        echoGuardRef.current = true;
+        setTimeout(() => { echoGuardRef.current = false; }, TTS_ECHO_GUARD_MS);
         go("idle");
       };
+
+      utter.onend = onDone;
       utter.onerror = (e) => {
         if (e.error === "interrupted") return;
-        if (synthKeepAliveRef.current) { clearInterval(synthKeepAliveRef.current); synthKeepAliveRef.current = null; }
-        go("idle");
+        onDone();
       };
 
       go("speaking");
       speechSynthesis.speak(utter);
     };
+
     trySpeak();
   }
 
   async function sendToAI(text: string) {
-    const convId = convIdRef.current;
-    if (!convId || !text.trim()) { go("idle"); return; }
+    if (!text.trim()) { go("idle"); return; }
+
+    // Stop mic before thinking/speaking
+    stopRecognition();
 
     const selectedLang = langRef.current;
     go("thinking");
 
     try {
-      const res = await fetch(`/api/conversations/${convId}/messages`, {
+      const body: Record<string, any> = {
+        content: text.trim(),
+        langName: selectedLang.name,
+      };
+
+      if (convIdRef.current) {
+        body.conversationId = convIdRef.current;
+      } else {
+        // Guest mode: send local history for context
+        body.history = historyRef.current;
+      }
+
+      const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          content: text,
-          voiceMode: true,
-          detectedLang: selectedLang.code,
-          detectedLangName: selectedLang.name,
-        }),
+        body: JSON.stringify(body),
         credentials: "include",
       });
 
@@ -184,11 +205,19 @@ export default function Voice() {
           try {
             const d = JSON.parse(line.slice(6));
             if (d.content) { fullText += d.content; setAiText(fullText); }
+            if (d.conversationId && !convIdRef.current) convIdRef.current = d.conversationId;
           } catch {}
         }
       }
 
       if (!fullText.trim()) { go("idle"); return; }
+
+      // Update local history for guest context
+      historyRef.current = [
+        ...historyRef.current,
+        { role: "user", content: text.trim() },
+        { role: "assistant", content: fullText },
+      ].slice(-20);
 
       setAiText(fullText);
       speakText(fullText, selectedLang.code);
@@ -202,23 +231,30 @@ export default function Voice() {
   }
 
   function startListening() {
-    const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (!SR) { setVoiceSupported(false); setShowFallback(true); return; }
-    if (!convIdRef.current) return;
+    // Don't start if in echo guard window or not idle
+    if (echoGuardRef.current) return;
     if (phaseRef.current !== "idle") return;
 
+    const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SR) { setVoiceSupported(false); setShowFallback(true); return; }
+
+    // Cancel any leftover TTS before mic goes live
     stopTts();
 
     const rec = new SR();
     rec.lang = langRef.current.code;
-    rec.continuous = false;
+    rec.continuous = false;       // Listen once per tap
     rec.interimResults = true;
     rec.maxAlternatives = 1;
     recognitionRef.current = rec;
 
     let finalTranscript = "";
 
-    rec.onstart = () => { go("listening"); setInterimText(""); finalTranscript = ""; };
+    rec.onstart = () => {
+      go("listening");
+      setInterimText("");
+      finalTranscript = "";
+    };
 
     rec.onresult = (e: any) => {
       let interim = "";
@@ -237,7 +273,14 @@ export default function Voice() {
       recognitionRef.current = null;
       setInterimText("");
       const text = finalTranscript.trim();
-      if (text) { sendToAI(text); } else { go("idle"); }
+      // Only proceed if still in listening phase (not manually cancelled)
+      if (phaseRef.current === "listening") {
+        if (text) {
+          sendToAI(text);
+        } else {
+          go("idle");
+        }
+      }
     };
 
     rec.onerror = (e: any) => {
@@ -247,13 +290,10 @@ export default function Voice() {
         setVoiceSupported(false);
         setShowFallback(true);
         setErrorMsg("Microphone access denied. Please allow microphone access and try again.");
-        go("idle");
-      } else if (e.error === "no-speech") {
-        go("idle");
-      } else {
+      } else if (e.error !== "no-speech" && e.error !== "aborted") {
         console.warn("Speech recognition error:", e.error);
-        go("idle");
       }
+      go("idle");
     };
 
     try { rec.start(); } catch (err) {
@@ -264,11 +304,24 @@ export default function Voice() {
   }
 
   function handleMicClick() {
-    if (!ready) return;
-    if (phaseRef.current === "speaking") { stopTts(); go("idle"); return; }
-    if (phaseRef.current === "listening") { stopRecognition(); go("idle"); return; }
+    if (!ready || echoGuardRef.current) return;
+    if (phaseRef.current === "speaking") {
+      stopTts();
+      // Brief guard so echo doesn't immediately re-trigger
+      echoGuardRef.current = true;
+      setTimeout(() => { echoGuardRef.current = false; }, TTS_ECHO_GUARD_MS);
+      go("idle");
+      return;
+    }
+    if (phaseRef.current === "listening") {
+      stopRecognition();
+      go("idle");
+      return;
+    }
     if (phaseRef.current === "thinking") return;
-    setUserText(""); setAiText(""); setErrorMsg("");
+    setUserText("");
+    setAiText("");
+    setErrorMsg("");
     startListening();
   }
 
@@ -276,7 +329,9 @@ export default function Voice() {
     e.preventDefault();
     const text = fallbackText.trim();
     if (!text || phaseRef.current === "thinking") return;
-    setFallbackText(""); setUserText(text); setAiText("");
+    setFallbackText("");
+    setUserText(text);
+    setAiText("");
     await sendToAI(text);
   }
 
@@ -289,6 +344,7 @@ export default function Voice() {
 
     const initConv = async () => {
       if (convIdRef.current) { setReady(true); return; }
+      if (!user) { setReady(true); return; } // Guest mode — no conversation needed
       try {
         const listRes = await fetch("/api/conversations", { credentials: "include" });
         if (listRes.ok) {
@@ -323,7 +379,7 @@ export default function Voice() {
     : "#00e5ff";
 
   const label =
-    !ready                ? "⌛ INITIALIZING"
+    !ready                  ? "⌛ INITIALIZING"
     : phase === "listening" ? `🎙 LISTENING · ${lang.name.toUpperCase()}`
     : phase === "thinking"  ? "⚙ THINKING..."
     : phase === "speaking"  ? `🔊 SPEAKING · ${lang.name.toUpperCase()}`
@@ -354,7 +410,7 @@ export default function Voice() {
     <Layout title="Aichat - Voice" showBack noPadding>
       <div className="flex-1 flex flex-col items-center px-6 py-8 pt-20 relative">
 
-        {/* Language selector — top-right */}
+        {/* Language selector */}
         <div ref={menuRef} className="absolute top-20 right-6 z-20">
           <button
             data-testid="button-lang-switcher"
