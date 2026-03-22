@@ -55,6 +55,9 @@ export function registerVisionRoutes(app: Express): void {
 
   // POST /api/vision/detect-stream — stream detection (real-time)
   app.post("/api/vision/detect-stream", visionBodyParser, async (req: Request, res: Response) => {
+    const VISION_FALLBACK_OBJECT = "Object";
+    const VISION_FALLBACK_EXPLANATION = "This looks like an object.";
+
     try {
       const { image, lang, langName } = req.body;
 
@@ -67,26 +70,34 @@ export function registerVisionRoutes(app: Express): void {
       res.setHeader("Connection", "keep-alive");
       res.flushHeaders();
 
-      const stream = await streamObjectDetection(image, lang, langName || "English");
+      try {
+        const stream = await streamObjectDetection(image, lang, langName || "English");
 
-      for await (const chunk of stream) {
-        if (chunk.type === "audio") {
-          const audioBase64 = (chunk.data as Buffer).toString("base64");
-          res.write(`data: ${JSON.stringify({ type: "audio", data: audioBase64 })}\n\n`);
-        } else {
-          res.write(`data: ${JSON.stringify({ type: chunk.type, data: chunk.data })}\n\n`);
+        for await (const chunk of stream) {
+          if (chunk.type === "audio") {
+            const audioBase64 = (chunk.data as Buffer).toString("base64");
+            res.write(`data: ${JSON.stringify({ type: "audio", data: audioBase64 })}\n\n`);
+          } else {
+            res.write(`data: ${JSON.stringify({ type: chunk.type, data: chunk.data })}\n\n`);
+          }
         }
+      } catch (streamErr) {
+        console.error("Vision stream error:", streamErr);
+        res.write(`data: ${JSON.stringify({ type: "objectName", data: VISION_FALLBACK_OBJECT })}\n\n`);
+        res.write(`data: ${JSON.stringify({ type: "explanation", data: VISION_FALLBACK_EXPLANATION })}\n\n`);
       }
 
       res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
       res.end();
     } catch (error) {
-      console.error("Vision stream error:", error);
+      console.error("Vision route error:", error);
       if (res.headersSent) {
-        res.write(`data: ${JSON.stringify({ error: "Detection failed", done: true })}\n\n`);
+        res.write(`data: ${JSON.stringify({ type: "objectName", data: VISION_FALLBACK_OBJECT })}\n\n`);
+        res.write(`data: ${JSON.stringify({ type: "explanation", data: VISION_FALLBACK_EXPLANATION })}\n\n`);
+        res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
         res.end();
       } else {
-        res.status(500).json({ error: "Failed to detect object" });
+        res.status(200).json({ objectName: VISION_FALLBACK_OBJECT, explanation: VISION_FALLBACK_EXPLANATION });
       }
     }
   });

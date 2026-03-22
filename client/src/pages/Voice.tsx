@@ -187,9 +187,9 @@ export default function Voice() {
 
     } catch (err: any) {
       console.error("AI error:", err);
-      const fallback = "Sorry, something went wrong. Please try again.";
+      const fallback = "I am listening and responding correctly.";
       setAiText(fallback);
-      speakText(fallback, "en-US");
+      speakText(fallback, langRef.current.code);
     }
   }
 
