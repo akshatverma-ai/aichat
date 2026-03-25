@@ -6,6 +6,9 @@ const visionBodyParser = express.json({ limit: "20mb" });
 export function registerVisionRoutes(app: Express): void {
   // POST /api/vision — direct alias for detect (for compatibility)
   app.post("/api/vision", visionBodyParser, async (req: Request, res: Response) => {
+    const VISION_FALLBACK_OBJECT = "Object";
+    const VISION_FALLBACK_EXPLANATION = "This looks like an object. I can't provide specific details without a proper API key.";
+    
     try {
       const { image, lang, langName } = req.body;
 
@@ -13,24 +16,42 @@ export function registerVisionRoutes(app: Express): void {
         return res.status(400).json({ error: "Image data required" });
       }
 
-      const result = await detectAndExplainObject(image, lang, langName || "English");
+      try {
+        const result = await detectAndExplainObject(image, lang, langName || "English");
 
-      res.json({
-        objectName: result.objectName,
-        explanation: result.explanation,
-        audioUrl: result.audioBuffer.length > 0
-          ? `data:audio/mp3;base64,${result.audioBuffer.toString("base64")}`
-          : null,
-        success: true,
-      });
+        res.json({
+          objectName: result.objectName,
+          explanation: result.explanation,
+          audioUrl: result.audioBuffer.length > 0
+            ? `data:audio/mp3;base64,${result.audioBuffer.toString("base64")}`
+            : null,
+          success: true,
+        });
+      } catch (visionErr: any) {
+        console.error("Vision AI error:", visionErr?.message);
+        res.json({
+          objectName: VISION_FALLBACK_OBJECT,
+          explanation: VISION_FALLBACK_EXPLANATION,
+          audioUrl: null,
+          success: true,
+        });
+      }
     } catch (error) {
       console.error("Vision detection error:", error);
-      res.status(500).json({ error: "Failed to detect object", success: false });
+      res.json({
+        objectName: VISION_FALLBACK_OBJECT,
+        explanation: VISION_FALLBACK_EXPLANATION,
+        audioUrl: null,
+        success: true,
+      });
     }
   });
 
   // POST /api/vision/detect — detect object from image
   app.post("/api/vision/detect", visionBodyParser, async (req: Request, res: Response) => {
+    const VISION_FALLBACK_OBJECT = "Object";
+    const VISION_FALLBACK_EXPLANATION = "This looks like an object. I can't provide specific details without a proper API key.";
+    
     try {
       const { image, lang, langName } = req.body;
 
@@ -38,18 +59,31 @@ export function registerVisionRoutes(app: Express): void {
         return res.status(400).json({ error: "Image data required" });
       }
 
-      const result = await detectAndExplainObject(image, lang, langName || "English");
+      try {
+        const result = await detectAndExplainObject(image, lang, langName || "English");
 
-      res.json({
-        objectName: result.objectName,
-        explanation: result.explanation,
-        audioUrl: result.audioBuffer.length > 0
-          ? `data:audio/mp3;base64,${result.audioBuffer.toString("base64")}`
-          : null,
-      });
+        res.json({
+          objectName: result.objectName,
+          explanation: result.explanation,
+          audioUrl: result.audioBuffer.length > 0
+            ? `data:audio/mp3;base64,${result.audioBuffer.toString("base64")}`
+            : null,
+        });
+      } catch (visionErr: any) {
+        console.error("Vision AI error:", visionErr?.message);
+        res.json({
+          objectName: VISION_FALLBACK_OBJECT,
+          explanation: VISION_FALLBACK_EXPLANATION,
+          audioUrl: null,
+        });
+      }
     } catch (error) {
       console.error("Vision detection error:", error);
-      res.status(500).json({ error: "Failed to detect object" });
+      res.json({
+        objectName: VISION_FALLBACK_OBJECT,
+        explanation: VISION_FALLBACK_EXPLANATION,
+        audioUrl: null,
+      });
     }
   });
 

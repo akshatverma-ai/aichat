@@ -186,7 +186,7 @@ export default function Chat() {
   };
 
   return (
-    <Layout title="Aichat - Text Chat" noPadding>
+    <Layout title="Aichat - Text Chat" showBack noPadding>
       <div className="flex-1 flex flex-col h-full pt-20 pb-4 px-4 relative">
 
         {/* Language selector — top-right below header */}

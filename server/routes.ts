@@ -6,6 +6,7 @@ import { z } from "zod";
 import session from "express-session";
 import { pool } from "./db";
 import connectPg from "connect-pg-simple";
+import SqliteStore from "connect-sqlite3";
 import { registerAudioRoutes } from "./replit_integrations/audio";
 import { registerImageRoutes } from "./replit_integrations/image";
 import { registerVisionRoutes } from "./replit_integrations/vision";
@@ -17,6 +18,21 @@ declare module "express-session" {
 }
 
 const PostgresStore = connectPg(session);
+const SQLiteStore = SqliteStore(session);
+
+// Simple fallback for API failures
+function getEmergencyFallback(userMessage: string): string {
+  const lowerMessage = userMessage.toLowerCase().trim();
+  
+  // Basic identity responses
+  if (lowerMessage.includes('who are you') || lowerMessage.includes('tum kon ho') || 
+      lowerMessage.includes('aap kon ho') || lowerMessage.includes('what is your name')) {
+    return "I'm an AI assistant here to help you with your questions.";
+  }
+  
+  // Basic help response
+  return "I'm having trouble connecting right now. Please try again in a moment.";
+}
 
 export function requireAuth(req: Request, res: Response, next: NextFunction) {
   if (!req.session?.userId) {
@@ -31,10 +47,12 @@ export async function registerRoutes(
 ): Promise<Server> {
   app.use(
     session({
-      store: new PostgresStore({
-        pool,
-        createTableIfMissing: true,
-      }),
+      store: (process.env.DATABASE_URL?.startsWith('sqlite:') 
+        ? new SQLiteStore({ db: 'sessions.db', dir: '.' })
+        : new PostgresStore({
+            pool,
+            createTableIfMissing: true,
+          })) as any,
       secret: process.env.SESSION_SECRET || "aiva_secret_key_2024",
       resave: false,
       saveUninitialized: false,
@@ -209,18 +227,34 @@ export async function registerRoutes(
       res.setHeader("Connection", "keep-alive");
       res.flushHeaders();
 
-      const CHAT_FALLBACK = "Hello! Aichat is working.";
-
       try {
         const { getOpenAI } = await import("./replit_integrations/audio/client");
         const openai = getOpenAI();
+
+        // Check if API key is properly configured
+        if (!openai.apiKey || openai.apiKey.includes('your-actual') || openai.apiKey.includes('placeholder')) {
+          throw new Error("OpenAI API key not configured. Please set a valid OPENAI_API_KEY in your .env file.");
+        }
+
+        // Natural, conversational system prompt
+        const systemPrompt = `You are Aichat, a friendly and intelligent AI assistant. ${personalityNote} ${langRule}
+
+You are naturally conversational and helpful. You can:
+- Answer any question on any topic (science, history, technology, current events, etc.)
+- Help with mathematical calculations and explain concepts
+- Assist with currency conversions and financial questions
+- Explain complex topics in simple, easy-to-understand ways
+- Have natural, engaging conversations
+- Be creative, helpful, and supportive
+
+Always respond naturally and conversationally, like a helpful human assistant. Be warm, friendly, and engaging. If you don't know something, say so honestly.`;
 
         const stream = await openai.chat.completions.create({
           model: "gpt-4o-mini",
           messages: [{ role: "system", content: systemPrompt }, ...chatHistory],
           stream: true,
-          max_completion_tokens: 400,
-          temperature: 0.7,
+          max_completion_tokens: 600,
+          temperature: 0.8,
         });
 
         let fullResponse = "";
@@ -237,9 +271,12 @@ export async function registerRoutes(
         }
       } catch (aiErr: any) {
         console.error("Chat AI error:", aiErr?.message);
-        res.write(`data: ${JSON.stringify({ content: CHAT_FALLBACK })}\n\n`);
+        
+        // Simple emergency fallback
+        const fallbackResponse = getEmergencyFallback(content);
+        res.write(`data: ${JSON.stringify({ content: fallbackResponse })}\n\n`);
         if (userId && (req as any)._convId) {
-          await storage.createMessage((req as any)._convId, "assistant", CHAT_FALLBACK);
+          await storage.createMessage((req as any)._convId, "assistant", fallbackResponse);
         }
       }
 
@@ -247,12 +284,11 @@ export async function registerRoutes(
       res.end();
     } catch (err) {
       console.error("Chat route error:", err);
-      const CHAT_FALLBACK = "Hello! Aichat is working.";
+      const fallbackResponse = getEmergencyFallback(content || "hello");
       if (res.headersSent) {
-        res.write(`data: ${JSON.stringify({ content: CHAT_FALLBACK, done: true })}\n\n`);
-        res.end();
+        res.write(`data: ${JSON.stringify({ content: fallbackResponse, done: true })}\n\n`);
       } else {
-        res.status(200).json({ message: CHAT_FALLBACK });
+        res.json([{ role: "assistant", content: fallbackResponse }]);
       }
     }
   });
@@ -269,7 +305,7 @@ export async function registerRoutes(
 
   app.get(api.conversations.get.path, requireAuth, async (req, res) => {
     try {
-      const id = parseInt(req.params.id);
+      const id = parseInt(Array.isArray(req.params.id) ? req.params.id[0] : req.params.id);
       const convo = await storage.getConversation(id);
       if (!convo || convo.userId !== req.session.userId) {
         return res.status(404).json({ message: "Conversation not found" });
@@ -293,7 +329,7 @@ export async function registerRoutes(
 
   app.delete(api.conversations.delete.path, requireAuth, async (req, res) => {
     try {
-      const id = parseInt(req.params.id);
+      const id = parseInt(Array.isArray(req.params.id) ? req.params.id[0] : req.params.id);
       const convo = await storage.getConversation(id);
       if (!convo || convo.userId !== req.session.userId) {
         return res.status(404).json({ message: "Conversation not found" });

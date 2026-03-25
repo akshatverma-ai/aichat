@@ -10,13 +10,21 @@ export default function Splash() {
   useEffect(() => {
     // Set a maximum of 3 seconds total wait
     const maxWaitTimer = setTimeout(() => {
-      setLocation("/");
+      if (user) {
+        setLocation("/home");
+      } else {
+        setLocation("/login");
+      }
     }, 3000);
 
     // Also redirect once loading is done and we have a result
     if (!isLoading) {
       const timer = setTimeout(() => {
-        setLocation("/");
+        if (user) {
+          setLocation("/home");
+        } else {
+          setLocation("/login");
+        }
       }, 500);
 
       return () => {
